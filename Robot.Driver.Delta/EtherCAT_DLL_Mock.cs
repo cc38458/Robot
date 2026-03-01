@@ -4,9 +4,9 @@
 // 編譯符號 MOCK 時引用此檔，命名空間與類別名稱完全相同
 // ═══════════════════════════════════════════════════════════════════
 
-namespace EtherCAT_DLL_x64
+namespace EtherCAT_DLL_Mock
 {
-    public class CEtherCAT_DLL
+    public class CEtherCAT_Mock
     {
         // ── 模擬狀態 ──
         private static readonly object _lock = new();

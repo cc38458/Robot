@@ -24,20 +24,11 @@
     <DefineConstants>$(DefineConstants);MOCK</DefineConstants>
   </PropertyGroup>
 
-  <!-- 
-    兩個 DLL 檔案都保留在方案總管中，但編譯時互斥：
-    正式版：編譯 x64，Mock 設為 None（可見但不編譯）
-    模擬版：編譯 Mock，x64 設為 None
+  <!--
+    兩個後端都編譯進同一個組件，執行期由 DeltaDriver/CommThread 切換：
+    - EtherCAT_DLL_x64.cs：實體手臂
+    - EtherCAT_DLL_Mock.cs：虛擬手臂
   -->
-  <ItemGroup Condition="'$(_IsMockBuild)' != 'true'">
-    <Compile Remove="EtherCAT_DLL_Mock.cs" />
-    <None Include="EtherCAT_DLL_Mock.cs" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(_IsMockBuild)' == 'true'">
-    <Compile Remove="EtherCAT_DLL_x64.cs" />
-    <None Include="EtherCAT_DLL_x64.cs" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Robot.Core\Robot.Core.csproj" />

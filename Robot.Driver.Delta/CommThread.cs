@@ -1,7 +1,3 @@
-#if MOCK
-// Mock 模式：使用 EtherCAT_DLL_Mock.cs（同命名空間，無需切換 using）
-#endif
-using EtherCAT_DLL_x64;
 using Robot.Core.Enums;
 using Robot.Core.Logging;
 using Robot.Core.Models;
@@ -70,18 +66,21 @@ namespace Robot.Driver.Delta
 
         // ── 日誌 ──
         private readonly RobotLogger _log;
+        private readonly IEtherCatApi _ecat;
 
         // ── 零點設定檔路徑 ──
         private readonly string _zeroConfigPath;
 
-        public CommThread(RobotLogger logger, string zeroConfigPath = "axis_zero_config.json")
+        public CommThread(RobotLogger logger, string zeroConfigPath = "axis_zero_config.json", bool useMockBackend = false)
         {
             _log = logger;
+            _ecat = useMockBackend ? new MockEtherCatApi() : new RealEtherCatApi();
             _zeroConfigPath = zeroConfigPath;
             for (int i = 0; i < AXIS_COUNT; i++)
                 _queues[i] = new Queue<MotionCommand>();
             _mainThreadHeartbeat = DateTime.UtcNow.Ticks;
             _commThreadHeartbeat = DateTime.UtcNow.Ticks;
+            _log.Info($"EtherCAT 後端：{(useMockBackend ? "Mock" : "Real")}");
         }
 
         // ════════════════════════════════════════
@@ -323,15 +322,15 @@ namespace Robot.Driver.Delta
         private bool DoConnect()
         {
             ushort cardsNum = 0;
-            var ret = CEtherCAT_DLL.CS_ECAT_Master_Open(ref cardsNum);
+            var ret = _ecat.CS_ECAT_Master_Open(ref cardsNum);
             _log.DllReturn("Master_Open", ret, $"軸卡數量={cardsNum}");
             if (ret != 0 || cardsNum != 1) return false;
 
-            ret = CEtherCAT_DLL.CS_ECAT_Master_Get_CardSeq(1, ref _cardNo);
+            ret = _ecat.CS_ECAT_Master_Get_CardSeq(1, ref _cardNo);
             _log.DllReturn("Master_Get_CardSeq", ret, $"CardNo={_cardNo}");
             if (ret != 0) return false;
 
-            ret = CEtherCAT_DLL.CS_ECAT_Master_Initial(_cardNo);
+            ret = _ecat.CS_ECAT_Master_Initial(_cardNo);
             _log.DllReturn("Master_Initial", ret);
             if (ret != 0) return false;
 
@@ -341,7 +340,7 @@ namespace Robot.Driver.Delta
             while (initDone == 1 && timer < CONN_TIMEOUT_MS / CONN_POLL_MS)
             {
                 Thread.Sleep(CONN_POLL_MS);
-                ret = CEtherCAT_DLL.CS_ECAT_Master_Check_Initial_Done(_cardNo, ref initDone);
+                ret = _ecat.CS_ECAT_Master_Check_Initial_Done(_cardNo, ref initDone);
                 if (initDone == 99)
                 {
                     _log.Error("軸卡初始化失敗 (InitDone=99)");
@@ -369,7 +368,7 @@ namespace Robot.Driver.Delta
 
             // 1. 確認軸數
             ushort slaveNum = 0;
-            var ret = CEtherCAT_DLL.CS_ECAT_Master_Get_SlaveNum(_cardNo, ref slaveNum);
+            var ret = _ecat.CS_ECAT_Master_Get_SlaveNum(_cardNo, ref slaveNum);
             _log.DllReturn("Get_SlaveNum", ret, $"軸數={slaveNum}");
             if (slaveNum < AXIS_COUNT)
             {
@@ -385,26 +384,26 @@ namespace Robot.Driver.Delta
             for (ushort i = 0; i < AXIS_COUNT; i++)
             {
                 // 設定 CSP 模式
-                ret = CEtherCAT_DLL.CS_ECAT_Slave_Motion_Set_MoveMode(_cardNo, i, 0, 8);
+                ret = _ecat.CS_ECAT_Slave_Motion_Set_MoveMode(_cardNo, i, 0, 8);
                 _log.DllReturn("Set_MoveMode", ret, $"軸{i} → CSP");
                 if (ret != 0) return false;
 
                 // 設定齒輪比
-                ret = CEtherCAT_DLL.CS_ECAT_Slave_CSP_Set_Gear(_cardNo, i, 0, _pulse2Ang[i], 1000, 1);
+                ret = _ecat.CS_ECAT_Slave_CSP_Set_Gear(_cardNo, i, 0, _pulse2Ang[i], 1000, 1);
                 _log.DllReturn("Set_Gear", ret, $"軸{i}: {_pulse2Ang[i]}/1000");
                 if (ret != 0) return false;
 
                 // 啟用虛擬位置
-                ret = CEtherCAT_DLL.CS_ECAT_Slave_CSP_Virtual_Set_Enable(_cardNo, i, 0, 1);
+                ret = _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Enable(_cardNo, i, 0, 1);
                 _log.DllReturn("Virtual_Set_Enable", ret, $"軸{i}");
                 if (ret != 0) return false;
 
                 // 設定零點偏移
-                ret = CEtherCAT_DLL.CS_ECAT_Slave_CSP_Virtual_Set_Command(_cardNo, i, 0, -_zeroPulse[i]);
+                ret = _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Command(_cardNo, i, 0, -_zeroPulse[i]);
                 _log.DllReturn("Virtual_Set_Command", ret, $"軸{i}: 偏移={-_zeroPulse[i]}");
 
                 // Servo ON
-                ret = CEtherCAT_DLL.CS_ECAT_Slave_Motion_Set_Svon(_cardNo, i, 0, 1);
+                ret = _ecat.CS_ECAT_Slave_Motion_Set_Svon(_cardNo, i, 0, 1);
                 _log.DllReturn("Set_Svon", ret, $"軸{i} ON");
                 if (ret != 0) return false;
 
@@ -478,10 +477,10 @@ namespace Robot.Driver.Delta
                 int pos = 0, speed = 0;
                 ushort mdone = 0, statusWord = 0;
 
-                ret = CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Position(_cardNo, i, 0, ref pos);
-                ret = CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Current_Speed(_cardNo, i, 0, ref speed);
-                ret = CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Mdone(_cardNo, i, 0, ref mdone);
-                ret = CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_StatusWord(_cardNo, i, 0, ref statusWord);
+                ret = _ecat.CS_ECAT_Slave_Motion_Get_Position(_cardNo, i, 0, ref pos);
+                ret = _ecat.CS_ECAT_Slave_Motion_Get_Current_Speed(_cardNo, i, 0, ref speed);
+                ret = _ecat.CS_ECAT_Slave_Motion_Get_Mdone(_cardNo, i, 0, ref mdone);
+                ret = _ecat.CS_ECAT_Slave_Motion_Get_StatusWord(_cardNo, i, 0, ref statusWord);
 
                 lock (_stateLock)
                 {
@@ -538,16 +537,16 @@ namespace Robot.Driver.Delta
                 if (_queues[axis].Count == 0)
                 {
                     ushort bufLen = 0;
-                    CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Buffer_Length(_cardNo, (ushort)axis, 0, ref bufLen);
+                    _ecat.CS_ECAT_Slave_Motion_Get_Buffer_Length(_cardNo, (ushort)axis, 0, ref bufLen);
                     if (bufLen == 0)
                     {
                         // 軸已完成所有指令，如果速度不為零，補一個減速停止
                         int spd = 0;
-                        CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Current_Speed(_cardNo, (ushort)axis, 0, ref spd);
+                        _ecat.CS_ECAT_Slave_Motion_Get_Current_Speed(_cardNo, (ushort)axis, 0, ref spd);
                         if (Math.Abs(spd) > 0)
                         {
                             _log.Warn($"軸 {axis} 最後指令 endVel≠0 且無後續指令，自動 Sd_Stop");
-                            CEtherCAT_DLL.CS_ECAT_Slave_Motion_Sd_Stop(_cardNo, (ushort)axis, 0, DEFAULT_SDSTOP_TDEC);
+                            _ecat.CS_ECAT_Slave_Motion_Sd_Stop(_cardNo, (ushort)axis, 0, DEFAULT_SDSTOP_TDEC);
                         }
                     }
                 }
@@ -572,7 +571,7 @@ namespace Robot.Driver.Delta
 
                     // 檢查硬體 buffer 餘量
                     ushort bufLen = 0;
-                    CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Buffer_Length(_cardNo, (ushort)i, 0, ref bufLen);
+                    _ecat.CS_ECAT_Slave_Motion_Get_Buffer_Length(_cardNo, (ushort)i, 0, ref bufLen);
                     if (bufLen >= HW_BUFFER_SAFE_LIMIT) continue; // buffer 快滿，等下一輪
 
                     var cmd = _queues[i].Peek();
@@ -614,7 +613,7 @@ namespace Robot.Driver.Delta
             switch (cmd.Type)
             {
                 case CommandType.MoveAbsolute:
-                    ret = CEtherCAT_DLL.CS_ECAT_Slave_CSP_Start_Move(
+                    ret = _ecat.CS_ECAT_Slave_CSP_Start_Move(
                         _cardNo, cmd.Axis, 0,
                         cmd.Dist, cmd.StrVel, cmd.ConstVel, cmd.EndVel,
                         cmd.TAcc, cmd.TDec, 0, 1); // SCurve=0, IsAbs=1
@@ -623,7 +622,7 @@ namespace Robot.Driver.Delta
                     break;
 
                 case CommandType.MoveRelative:
-                    ret = CEtherCAT_DLL.CS_ECAT_Slave_CSP_Start_Move(
+                    ret = _ecat.CS_ECAT_Slave_CSP_Start_Move(
                         _cardNo, cmd.Axis, 0,
                         cmd.Dist, cmd.StrVel, cmd.ConstVel, cmd.EndVel,
                         cmd.TAcc, cmd.TDec, 0, 0); // IsAbs=0
@@ -636,7 +635,7 @@ namespace Robot.Driver.Delta
                         ushort dir = (ushort)(cmd.ConstVel >= 0 ? 0 : 1);
                         int absVel = Math.Abs(cmd.ConstVel);
                         int absStr = Math.Abs(cmd.StrVel);
-                        ret = CEtherCAT_DLL.CS_ECAT_Slave_CSP_Start_V_Move(
+                        ret = _ecat.CS_ECAT_Slave_CSP_Start_V_Move(
                             _cardNo, cmd.Axis, 0,
                             dir, absStr, absVel, cmd.TAcc, 0);
                         _log.DllReturn("CSP_Start_V_Move", ret);
@@ -647,7 +646,7 @@ namespace Robot.Driver.Delta
                 case CommandType.MovePT:
                     if (cmd.TargetPos != null && cmd.TargetTime != null)
                     {
-                        ret = CEtherCAT_DLL.CS_ECAT_Slave_CSP_Start_PVTComplete_Move(
+                        ret = _ecat.CS_ECAT_Slave_CSP_Start_PVTComplete_Move(
                             _cardNo, cmd.Axis, 0,
                             cmd.DataCount, ref cmd.TargetPos[0], ref cmd.TargetTime[0],
                             cmd.StrVel, cmd.EndVel, 1); // Abs=1
@@ -657,7 +656,7 @@ namespace Robot.Driver.Delta
                     break;
 
                 case CommandType.Stop:
-                    ret = CEtherCAT_DLL.CS_ECAT_Slave_Motion_Sd_Stop(_cardNo, cmd.Axis, 0, cmd.TDec);
+                    ret = _ecat.CS_ECAT_Slave_Motion_Sd_Stop(_cardNo, cmd.Axis, 0, cmd.TDec);
                     _log.DllReturn("Sd_Stop", ret, $"軸{cmd.Axis}");
                     break;
             }
@@ -676,7 +675,7 @@ namespace Robot.Driver.Delta
             for (ushort i = 0; i < AXIS_COUNT; i++)
             {
                 if (cmd.MultiDataCount[i] <= 0) continue;
-                var ret = CEtherCAT_DLL.CS_ECAT_Slave_CSP_Start_PVTComplete_Config(
+                var ret = _ecat.CS_ECAT_Slave_CSP_Start_PVTComplete_Config(
                     _cardNo, i, 0,
                     cmd.MultiDataCount[i],
                     ref cmd.MultiTargetPos[i][0],
@@ -688,7 +687,7 @@ namespace Robot.Driver.Delta
             // 2. 同步啟動
             ushort[] axisArray = { 0, 1, 2, 3, 4, 5 };
             ushort[] slotArray = { 0, 0, 0, 0, 0, 0 };
-            var syncRet = CEtherCAT_DLL.CS_ECAT_Slave_CSP_Start_PVT_Sync_Move(
+            var syncRet = _ecat.CS_ECAT_Slave_CSP_Start_PVT_Sync_Move(
                 _cardNo, AXIS_COUNT, ref axisArray[0], ref slotArray[0]);
             _log.DllReturn("PVT_Sync_Move", syncRet);
 
@@ -713,7 +712,7 @@ namespace Robot.Driver.Delta
             ClearAllQueues();
             for (ushort i = 0; i < AXIS_COUNT; i++)
             {
-                var ret = CEtherCAT_DLL.CS_ECAT_Slave_Motion_Emg_Stop(_cardNo, i, 0);
+                var ret = _ecat.CS_ECAT_Slave_Motion_Emg_Stop(_cardNo, i, 0);
                 _log.DllReturn("Emg_Stop", ret, $"軸{i}");
             }
             lock (_stateLock)
@@ -729,7 +728,7 @@ namespace Robot.Driver.Delta
             ClearAllQueues();
             for (ushort i = 0; i < AXIS_COUNT; i++)
             {
-                var ret = CEtherCAT_DLL.CS_ECAT_Slave_Motion_Sd_Stop(_cardNo, i, 0, DEFAULT_SDSTOP_TDEC);
+                var ret = _ecat.CS_ECAT_Slave_Motion_Sd_Stop(_cardNo, i, 0, DEFAULT_SDSTOP_TDEC);
                 _log.DllReturn("Sd_Stop", ret, $"軸{i}");
             }
         }
@@ -739,11 +738,11 @@ namespace Robot.Driver.Delta
             _log.Info("執行全軸警報復歸");
             for (ushort i = 0; i < AXIS_COUNT; i++)
             {
-                var ret = CEtherCAT_DLL.CS_ECAT_Slave_Motion_Ralm(_cardNo, i, 0);
+                var ret = _ecat.CS_ECAT_Slave_Motion_Ralm(_cardNo, i, 0);
                 _log.DllReturn("Ralm", ret, $"軸{i}");
 
                 // 重新 Servo ON
-                ret = CEtherCAT_DLL.CS_ECAT_Slave_Motion_Set_Svon(_cardNo, i, 0, 1);
+                ret = _ecat.CS_ECAT_Slave_Motion_Set_Svon(_cardNo, i, 0, 1);
                 _log.DllReturn("Set_Svon", ret, $"軸{i} ON");
             }
             _requestedCardState = CardState.READY;
@@ -756,11 +755,11 @@ namespace Robot.Driver.Delta
             // Servo OFF
             for (ushort i = 0; i < AXIS_COUNT; i++)
             {
-                CEtherCAT_DLL.CS_ECAT_Slave_Motion_Set_Svon(_cardNo, i, 0, 0);
+                _ecat.CS_ECAT_Slave_Motion_Set_Svon(_cardNo, i, 0, 0);
                 lock (_stateLock) { _state[i] = MotorState.NULL; }
             }
             // 關閉主站
-            CEtherCAT_DLL.CS_ECAT_Master_Close();
+            _ecat.CS_ECAT_Master_Close();
             _cardState = CardState.NULL;
             _log.Info("EtherCAT 主站已關閉");
         }

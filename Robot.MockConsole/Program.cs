@@ -15,18 +15,21 @@ namespace Robot.MockConsole
             Console.OutputEncoding = System.Text.Encoding.UTF8;
             Console.Title = "RA605 Mock Console";
 
+            bool useMockBackend = ResolveBackendMode(args);
+
             PrintBanner();
 
             // ── 日誌 ──
             var log = new RobotLogger("logs", "MockConsole", LogLevel.DEBUG);
             log.Info("Mock 主控台啟動");
+            log.Info($"後端模式：{(useMockBackend ? "Mock" : "Real")}");
 
-            // ── Mock 驅動 ──
-            var driver = new DeltaDriver(log, "axis_zero_config.json");
+            // ── 可切換後端驅動（Real / Mock） ──
+            var driver = new DeltaDriver(log, "axis_zero_config.json", useMockBackend);
 
             // ── 連線/初始化 ──
             Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.WriteLine("\n[1/3] 建立 EtherCAT 連線 (Mock)...");
+            Console.WriteLine($"\n[1/3] 建立 EtherCAT 連線 ({(useMockBackend ? "Mock" : "Real")})...");
             Console.ResetColor();
 
             if (!driver.Start())
@@ -152,8 +155,8 @@ namespace Robot.MockConsole
                             // 模擬觸發警報（測試用）
                             if (parts.Length >= 2 && ushort.TryParse(parts[1], out var alarmAxis))
                             {
-                                // 透過反射呼叫 Mock 方法，避免非 MOCK 編譯時報錯
-                                var dllType = Type.GetType("EtherCAT_DLL_x64.CEtherCAT_DLL, Robot.Driver.Delta");
+                                // 僅 Mock 後端可用：透過反射呼叫 Mock API
+                                var dllType = Type.GetType("EtherCAT_DLL_Mock.CEtherCAT_Mock, Robot.Driver.Delta");
                                 var method = dllType?.GetMethod("Mock_TriggerAlarm",
                                     System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
                                 if (method != null)
@@ -165,7 +168,7 @@ namespace Robot.MockConsole
                                 }
                                 else
                                 {
-                                    Console.WriteLine("此指令僅在 MOCK 模式下可用（Mock_TriggerAlarm 不存在）");
+                                    Console.WriteLine("此指令僅在 Mock 後端可用");
                                 }
                             }
                             else
@@ -227,6 +230,33 @@ namespace Robot.MockConsole
   quit (q)            關閉程式
   ─────────────────────────────────");
             Console.ResetColor();
+        }
+
+        static bool ResolveBackendMode(string[] args)
+        {
+            // 預設 Mock，避免誤控實體
+            bool useMock = true;
+
+            foreach (var arg in args)
+            {
+                if (arg.Equals("--real", StringComparison.OrdinalIgnoreCase))
+                    useMock = false;
+                else if (arg.Equals("--mock", StringComparison.OrdinalIgnoreCase))
+                    useMock = true;
+                else if (arg.StartsWith("--backend=", StringComparison.OrdinalIgnoreCase))
+                {
+                    var mode = arg.Substring("--backend=".Length).Trim().ToLowerInvariant();
+                    if (mode == "real") useMock = false;
+                    if (mode == "mock") useMock = true;
+                }
+            }
+
+            // 環境變數可覆蓋（REAL / MOCK）
+            var env = Environment.GetEnvironmentVariable("ROBOT_BACKEND")?.Trim().ToUpperInvariant();
+            if (env == "REAL") useMock = false;
+            if (env == "MOCK") useMock = true;
+
+            return useMock;
         }
 
         static void PrintStatus(DeltaDriver driver)

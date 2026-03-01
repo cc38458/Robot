@@ -32,10 +32,11 @@ namespace Robot.Driver.Delta
         /// </summary>
         /// <param name="logger">日誌系統</param>
         /// <param name="zeroConfigPath">零點設定 JSON 檔路徑</param>
-        public DeltaDriver(RobotLogger logger, string zeroConfigPath = "axis_zero_config.json")
+        /// <param name="useMockBackend">true: 使用虛擬手臂後端；false: 使用實體 EtherCAT 後端</param>
+        public DeltaDriver(RobotLogger logger, string zeroConfigPath = "axis_zero_config.json", bool useMockBackend = false)
         {
             _log = logger;
-            _comm = new CommThread(logger, zeroConfigPath);
+            _comm = new CommThread(logger, zeroConfigPath, useMockBackend);
             _heartbeatTimer = new Timer(HeartbeatCallback, null,
                 Timeout.Infinite, Timeout.Infinite);
         }
