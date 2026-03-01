@@ -338,8 +338,8 @@ vp.addEventListener('mousedown', e=>{drag=true;pm={x:e.clientX,y:e.clientY}});
 window.addEventListener('mouseup', ()=>drag=false);
 vp.addEventListener('mousemove', e=>{
   if(!drag)return;
-  cTh-=(e.clientX-pm.x)*0.005;
-  cPh=Math.max(0.05,Math.min(1.5,cPh+(e.clientY-pm.y)*0.005));
+  cTh+=(e.clientX-pm.x)*0.005;
+  cPh=Math.max(0.05,Math.min(1.5,cPh-(e.clientY-pm.y)*0.005));
   pm={x:e.clientX,y:e.clientY};
 });
 vp.addEventListener('wheel',e=>{cD=Math.max(0.5,Math.min(6,cD+e.deltaY*0.002));e.preventDefault()},{passive:false});
