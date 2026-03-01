@@ -2,18 +2,18 @@ using System.Net;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
-using Robot.Core.Enums;
 using Robot.Core.Interfaces;
 using Robot.Core.Logging;
 
 namespace Robot.Driver.Delta
 {
     /// <summary>
-    /// 輕量 WebSocket 監控伺服器（嵌入式，零外部依賴）
+    /// 唯讀 WebSocket 監控伺服器（嵌入式，零外部依賴）
     /// 功能：
     ///   1. 以 20Hz 頻率推送機械臂完整狀態（JSON）
-    ///   2. 接收瀏覽器端指令（回原點、急停、單軸角度設定）
-    ///   3. 提供 monitor.html 靜態檔案服務
+    ///   2. 提供 monitor.html 靜態檔案服務
+    /// 注意：
+    ///   - 本伺服器僅監看，不接受任何控制命令
     /// </summary>
     public class MonitorServer : IDisposable
     {
@@ -31,13 +31,6 @@ namespace Robot.Driver.Delta
 
         private const int BROADCAST_INTERVAL_MS = 50; // 20Hz
 
-        /// <summary>
-        /// 建立監控伺服器
-        /// </summary>
-        /// <param name="driver">軸卡驅動（通常為 Mock 模式的 DeltaDriver）</param>
-        /// <param name="logger">日誌</param>
-        /// <param name="port">HTTP/WebSocket 端口</param>
-        /// <param name="htmlPath">monitor.html 檔案路徑（null 則不提供靜態檔案）</param>
         public MonitorServer(IAxisCard driver, RobotLogger logger,
                              int port = 5850, string? htmlPath = null)
         {
@@ -47,7 +40,6 @@ namespace Robot.Driver.Delta
             _htmlPath = htmlPath;
         }
 
-        /// <summary>啟動伺服器（非阻塞）</summary>
         public void Start()
         {
             _listener = new HttpListener();
@@ -59,19 +51,16 @@ namespace Robot.Driver.Delta
             }
             catch (HttpListenerException)
             {
-                // 非管理員可能無法綁 +，改用 localhost
                 _listener = new HttpListener();
                 _listener.Prefixes.Add($"http://localhost:{_port}/");
                 _listener.Start();
             }
 
             _log.Info($"監控伺服器啟動：http://localhost:{_port}/");
-            _log.Info($"瀏覽器開啟上述網址即可檢視機械臂即時狀態");
+            _log.Info("Web 監控為唯讀模式（不接受控制命令）");
 
-            // 接收連線線程
             Task.Run(() => AcceptLoop(_cts.Token));
 
-            // 廣播線程
             _broadcastThread = new Thread(BroadcastLoop)
             {
                 Name = "MonitorBroadcast",
@@ -79,10 +68,6 @@ namespace Robot.Driver.Delta
             };
             _broadcastThread.Start();
         }
-
-        // ════════════════════════════════════════
-        // HTTP 接收迴圈
-        // ════════════════════════════════════════
 
         private async Task AcceptLoop(CancellationToken ct)
         {
@@ -100,7 +85,6 @@ namespace Robot.Driver.Delta
                     }
                     else
                     {
-                        // 靜態檔案服務
                         ServeHtml(ctx);
                     }
                 }
@@ -113,26 +97,16 @@ namespace Robot.Driver.Delta
             }
         }
 
-        // ════════════════════════════════════════
-        // 靜態 HTML 服務
-        // ════════════════════════════════════════
-
         private void ServeHtml(HttpListenerContext ctx)
         {
             var resp = ctx.Response;
             var reqPath = ctx.Request.Url?.AbsolutePath ?? "/";
             if (reqPath == "/") reqPath = "/monitor.html";
 
-            // 嘗試從 _htmlPath 的同級目錄提供靜態檔案
             string? baseDir = _htmlPath != null ? Path.GetDirectoryName(Path.GetFullPath(_htmlPath)) : null;
-
-            // 正規化路徑分隔符（URL 用 /，Windows 用 \）
             var relativePath = reqPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
             string? filePath = baseDir != null ? Path.Combine(baseDir, relativePath) : null;
 
-            _log.Debug($"[HTTP] 請求：{reqPath} → {filePath ?? "null"}");
-
-            // 安全：禁止目錄遍歷
             if (filePath != null && baseDir != null &&
                 Path.GetFullPath(filePath).StartsWith(Path.GetFullPath(baseDir)) &&
                 File.Exists(filePath))
@@ -151,7 +125,6 @@ namespace Robot.Driver.Delta
                     _ => "application/octet-stream",
                 };
 
-                // CORS 允許（開發用）
                 resp.Headers.Add("Access-Control-Allow-Origin", "*");
 
                 var data = File.ReadAllBytes(filePath);
@@ -162,7 +135,6 @@ namespace Robot.Driver.Delta
             }
             else
             {
-                // Fallback
                 var msg = "<!DOCTYPE html><html><body style='background:#111;color:#eee;font-family:monospace;padding:40px'>"
                         + "<h2>RA605 Monitor Server — 404</h2>"
                         + "<p>WebSocket: ws://localhost:" + _port + "/</p>"
@@ -180,30 +152,19 @@ namespace Robot.Driver.Delta
             }
         }
 
-        // ════════════════════════════════════════
-        // WebSocket 處理
-        // ════════════════════════════════════════
-
         private async Task HandleWebSocket(WebSocket socket, CancellationToken ct)
         {
             lock (_clientLock) { _clients.Add(socket); }
 
-            var buffer = new byte[4096];
+            var buffer = new byte[1024];
             try
             {
                 while (socket.State == WebSocketState.Open && !ct.IsCancellationRequested)
                 {
-                    var result = await socket.ReceiveAsync(
-                        new ArraySegment<byte>(buffer), ct);
-
+                    var result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
                     if (result.MessageType == WebSocketMessageType.Close)
                         break;
-
-                    if (result.MessageType == WebSocketMessageType.Text)
-                    {
-                        var msg = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                        HandleCommand(msg);
-                    }
+                    // 唯讀模式：忽略來自瀏覽器的文字訊息
                 }
             }
             catch (WebSocketException) { }
@@ -215,62 +176,6 @@ namespace Robot.Driver.Delta
                 _log.Info("WebSocket 客戶端已斷線");
             }
         }
-
-        /// <summary>處理來自瀏覽器的指令</summary>
-        private void HandleCommand(string json)
-        {
-            try
-            {
-                using var doc = JsonDocument.Parse(json);
-                var root = doc.RootElement;
-                var cmd = root.GetProperty("cmd").GetString();
-
-                switch (cmd)
-                {
-                    case "home":
-                        _log.Info("[監控] 收到回原點指令");
-                        _driver.MoveHome(20000, 0.5, 0.5);
-                        break;
-
-                    case "estop":
-                        _log.Warn("[監控] 收到緊急停止指令");
-                        _driver.Estop();
-                        break;
-
-                    case "ralm":
-                        _log.Info("[監控] 收到警報復歸指令");
-                        _driver.Ralm();
-                        break;
-
-                    case "setAngle":
-                        {
-                            var axis = (ushort)root.GetProperty("axis").GetInt32();
-                            var angle = root.GetProperty("angle").GetDouble();
-                            var angleMdeg = (int)(angle * 1000);
-                            _log.Debug($"[監控] 設定軸 {axis} → {angle:F1}°");
-                            _driver.MoveAbsolute(axis, angleMdeg, 0, 30000, 0, 0.3, 0.3);
-                        }
-                        break;
-
-                    case "moveRelative":
-                        {
-                            var axis = (ushort)root.GetProperty("axis").GetInt32();
-                            var delta = root.GetProperty("delta").GetDouble();
-                            var deltaMdeg = (int)(delta * 1000);
-                            _driver.MoveRelative(axis, deltaMdeg, 0, 20000, 0, 0.3, 0.3);
-                        }
-                        break;
-                }
-            }
-            catch (Exception ex)
-            {
-                _log.Error($"[監控] 指令解析失敗：{ex.Message}");
-            }
-        }
-
-        // ════════════════════════════════════════
-        // 狀態廣播
-        // ════════════════════════════════════════
 
         private void BroadcastLoop()
         {
@@ -322,41 +227,12 @@ namespace Robot.Driver.Delta
             {
                 type = "state",
                 cardState = (int)_driver.AxisCardState,
-                pos = pos,                                    // mdeg
-                speed = speed,                                // mdeg/s
+                pos,
+                speed,
                 motorState = motorState.Select(s => (int)s).ToArray(),
-                queueLen = queueLen,
+                queueLen,
                 timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds(),
             });
-        }
-
-        // ════════════════════════════════════════
-
-        /// <summary>傳送日誌訊息到所有連線的瀏覽器</summary>
-        public void PushLog(string level, string message)
-        {
-            var json = JsonSerializer.Serialize(new
-            {
-                type = "log",
-                level,
-                message,
-                timestamp = DateTimeOffset.Now.ToUnixTimeMilliseconds(),
-            });
-
-            var bytes = Encoding.UTF8.GetBytes(json);
-            var segment = new ArraySegment<byte>(bytes);
-
-            WebSocket[] snapshot;
-            lock (_clientLock) { snapshot = _clients.ToArray(); }
-
-            foreach (var ws in snapshot)
-            {
-                if (ws.State == WebSocketState.Open)
-                {
-                    try { ws.SendAsync(segment, WebSocketMessageType.Text, true, CancellationToken.None).Wait(); }
-                    catch { }
-                }
-            }
         }
 
         public void Dispose()

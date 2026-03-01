@@ -53,11 +53,7 @@ header .clk{font:12px var(--mono);color:var(--dim)}
   <span class="clk" id="clk"></span>
 </header>
 <div class="left">
-  <div class="stit">各軸狀態</div><div id="jcards"></div>
-  <div class="stit" style="margin-top:10px">手動控制</div><div id="sliders"></div>
-  <button class="btn" onclick="sendCmd('home')">🏠 回原點</button>
-  <button class="btn" onclick="sendCmd('ralm')">⚡ 清除警報</button>
-  <button class="btn dg" onclick="sendCmd('estop')">🛑 緊急停止</button>
+  <div class="stit">各軸狀態（唯讀）</div><div id="jcards"></div>
 </div>
 <div class="vp" id="vp">
   <div class="vpl">拖曳旋轉 ｜ 滾輪縮放</div>
@@ -358,8 +354,6 @@ function updateCam(){
 function initUI(){
   const jc=document.getElementById('jcards');
   for(let i=0;i<6;i++) jc.innerHTML+=`<div class="jc" id="jc${i}"><div class="jh"><span class="jn" style="color:${COLORS[i]}">${JNAMES[i]}</span><span class="js sn" id="js${i}">NULL</span></div><div class="jv" id="jv${i}">0.000°</div><div class="jsp" id="jp${i}">ω 0 ｜ Q 0</div><div class="jbb"><div class="jbf" id="jb${i}" style="width:50%"></div></div></div>`;
-  const sl=document.getElementById('sliders');
-  for(let i=0;i<6;i++) sl.innerHTML+=`<div class="sr"><label style="color:${COLORS[i]}">J${i+1}</label><input type="range" min="-180" max="180" value="0" step="0.5" id="sl${i}" oninput="onSl(${i},this.value)"><span class="sv" id="sv${i}">0.0°</span></div>`;
   const mg=document.getElementById('matG');
   for(let i=0;i<16;i++) mg.innerHTML+=`<div class="mc" id="m${i}">0</div>`;
 }
@@ -389,23 +383,6 @@ function updateUI(){
 }
 
 // ═══════════════════════════════════════
-// Controls
-// ═══════════════════════════════════════
-function onSl(i,v){
-  v=parseFloat(v);
-  document.getElementById(`sv${i}`).textContent=v.toFixed(1)+'°';
-  S.ang[i]=v;
-  if(ws&&ws.readyState===1) ws.send(JSON.stringify({cmd:'setAngle',axis:i,angle:v}));
-}
-
-function sendCmd(c){
-  if(ws&&ws.readyState===1) ws.send(JSON.stringify({cmd:c}));
-  if(c==='home'){for(let i=0;i<6;i++){S.ang[i]=0;document.getElementById(`sl${i}`).value=0;document.getElementById(`sv${i}`).textContent='0.0°';}addLog('INFO','回原點');}
-  if(c==='estop') addLog('WARN','🛑 緊急停止');
-  if(c==='ralm') addLog('INFO','清除警報');
-}
-
-// ═══════════════════════════════════════
 // WebSocket
 // ═══════════════════════════════════════
 function connectWS(){
@@ -418,7 +395,6 @@ function connectWS(){
       S.card=d.cardState??S.card;
       if(d.pos) S.ang=d.pos.map(v=>v/1000);
       S.spd=d.speed??S.spd; S.ms=d.motorState??S.ms; S.ql=d.queueLen??S.ql;
-      for(let i=0;i<6;i++){document.getElementById(`sl${i}`).value=S.ang[i];document.getElementById(`sv${i}`).textContent=S.ang[i].toFixed(1)+'°';}
     }else if(d.type==='log') addLog(d.level||'INFO',d.message);
   }catch(err){}};
   ws.onclose=()=>{document.getElementById('wb').textContent='WS 離線';document.getElementById('wb').className='bdg b-ws-off';addLog('WARN','斷線，3s重連...');setTimeout(connectWS,3000);};
@@ -453,7 +429,7 @@ function animate(){
 
 initUI(); onResize(); animate(); connectWS();
 addLog('INFO','RA605 3D 監控介面已啟動');
-addLog('INFO','Slider 可即時控制各軸（離線/連線模式皆可）');
+addLog('INFO','本頁為唯讀監控模式，不提供控制按鈕');
 </script>
 </body>
 </html>
