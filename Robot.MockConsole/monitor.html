@@ -308,11 +308,13 @@ loadAllMeshes();
 // Update joint angles
 // ═══════════════════════════════════════
 function updateArm(angDeg) {
+  // 方向校正：J3 維持原方向，其餘軸反向
+  const axisDirFix = [-1, -1, 1, -1, -1, -1];
   for (let i = 0; i < 6; i++) {
     const rad = angDeg[i] * Math.PI / 180;
     const ax = JOINTS[i].axis;
     const sign = ax[0] !== 0 ? ax[0] : (ax[1] !== 0 ? ax[1] : ax[2]);
-    jointGroups[i].rotation.set(0, 0, rad * sign);
+    jointGroups[i].rotation.set(0, 0, rad * sign * axisDirFix[i]);
   }
 }
 
