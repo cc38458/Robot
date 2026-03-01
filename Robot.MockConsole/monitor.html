@@ -232,6 +232,9 @@ function createFallbackLink(index, jointIndex) {
 // ═══════════════════════════════════════
 const robotRoot = new THREE.Group();
 scene.add(robotRoot);
+// URDF (ROS/CAD) frame is typically Z-up; Three.js world is Y-up.
+// Rotate the whole robot once so the base stands upright on the grid.
+robotRoot.rotation.x = -Math.PI / 2;
 
 const baseMeshGroup = new THREE.Group();
 robotRoot.add(baseMeshGroup);
@@ -376,7 +379,9 @@ function updateUI(){
     document.getElementById(`jb${i}`).style.width=((S.ang[i]+180)/360*100).toFixed(1)+'%';
   }
   const p=getEEWorldPos();
-  document.getElementById('eeI').innerHTML=`<div class="er"><span class="el">X</span><span class="ev">${(p.x*1000).toFixed(1)} mm</span></div><div class="er"><span class="el">Y</span><span class="ev">${(p.z*1000).toFixed(1)} mm</span></div><div class="er"><span class="el">Z</span><span class="ev">${(p.y*1000).toFixed(1)} mm</span></div>`;
+  // Convert back to robot-style coordinates after root frame correction:
+  // Xr = Xw, Yr = -Zw, Zr = Yw
+  document.getElementById('eeI').innerHTML=`<div class="er"><span class="el">X</span><span class="ev">${(p.x*1000).toFixed(1)} mm</span></div><div class="er"><span class="el">Y</span><span class="ev">${(-p.z*1000).toFixed(1)} mm</span></div><div class="er"><span class="el">Z</span><span class="ev">${(p.y*1000).toFixed(1)} mm</span></div>`;
   eeGroup.updateWorldMatrix(true,false);
   const wm=eeGroup.matrixWorld.elements;
   for(let c=0;c<4;c++)for(let r=0;r<4;r++) document.getElementById(`m${r*4+c}`).textContent=wm[c*4+r].toFixed(3);
