@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>RA605 六軸機械臂監控</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0e17;--panel:#111827;--brd:#1e293b;--acc:#22d3ee;--acc2:#a78bfa;--ok:#10b981;--warn:#f59e0b;--err:#ef4444;--txt:#e2e8f0;--dim:#64748b;--mono:'JetBrains Mono',monospace;--sans:'Noto Sans TC',sans-serif}
+body{background:var(--bg);color:var(--txt);font-family:var(--sans);height:100vh;overflow:hidden;display:grid;grid-template-columns:300px 1fr 280px;grid-template-rows:52px 1fr 150px;gap:1px;background-color:var(--brd)}
+header{grid-column:1/-1;background:var(--panel);display:flex;align-items:center;padding:0 20px;gap:12px}
+header h1{font:700 15px/1 var(--mono);letter-spacing:3px;color:var(--acc)}
+.bdg{padding:3px 10px;border-radius:4px;font:600 11px/1 var(--mono)}
+.b-ok{background:#064e3b;color:#34d399}.b-warn{background:#78350f;color:#fbbf24}.b-err{background:#7f1d1d;color:#fca5a5}.b-off{background:#1e293b;color:#64748b}
+.b-ws-on{background:#064e3b;color:#34d399}.b-ws-off{background:#1e293b;color:#64748b}
+header .sp{flex:1}
+header .clk{font:12px var(--mono);color:var(--dim)}
+.left{background:var(--panel);overflow-y:auto;padding:12px}
+.stit{font:700 10px/1 var(--mono);letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--brd)}
+.jc{background:#0f172a;border:1px solid var(--brd);border-radius:6px;padding:10px;margin-bottom:6px;transition:.3s}
+.jc.mv{border-color:var(--acc);box-shadow:inset 0 0 8px rgba(34,211,238,.1)}.jc.al{border-color:var(--err);animation:pls 1s infinite}
+@keyframes pls{50%{border-color:transparent}}
+.jh{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
+.jn{font:700 13px var(--mono)}.js{font:9px var(--mono);padding:2px 6px;border-radius:3px}
+.ss{background:#1e293b;color:#94a3b8}.sm{background:#164e63;color:var(--acc)}.sa{background:#7f1d1d;color:#fca5a5}.sn{background:#1e1e1e;color:#525252}
+.jv{font:700 20px var(--mono);color:#fff}.jsp{font:11px var(--mono);color:var(--dim);margin-top:2px}
+.jbb{height:3px;background:#1e293b;border-radius:2px;margin-top:6px;overflow:hidden}
+.jbf{height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2));border-radius:2px;transition:width .1s}
+.sr{display:flex;align-items:center;gap:6px;margin-bottom:3px}
+.sr label{font:10px var(--mono);color:var(--dim);min-width:20px}
+.sr input[type=range]{flex:1;accent-color:var(--acc);height:3px}
+.sr .sv{font:10px var(--mono);color:var(--acc);min-width:48px;text-align:right}
+.btn{width:100%;padding:7px;margin-bottom:5px;border:1px solid var(--brd);border-radius:5px;background:#0f172a;color:var(--txt);font:11px var(--mono);cursor:pointer;transition:.2s}
+.btn:hover{border-color:var(--acc);color:var(--acc)}.btn.dg:hover{border-color:var(--err);color:var(--err);background:#1c0a0a}
+.vp{background:var(--bg);position:relative}.vp canvas{display:block}
+.vpl{position:absolute;bottom:10px;left:10px;font:10px var(--mono);color:var(--dim);background:rgba(0,0,0,.5);padding:3px 8px;border-radius:3px}
+.vp-load{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font:13px var(--mono);color:var(--acc);background:rgba(0,0,0,.7);padding:10px 20px;border-radius:6px;pointer-events:none;transition:opacity .5s}
+.right{background:var(--panel);padding:12px;overflow-y:auto}
+.er{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #1e293b;font:12px var(--mono)}
+.el{color:var(--dim)}.ev{color:#fff;font-weight:600}
+.mg{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;margin-top:6px}
+.mc{background:#0f172a;padding:3px;text-align:center;font:9px var(--mono);color:var(--dim);border-radius:2px}
+.lp{grid-column:1/-1;background:#0c1017;padding:10px 14px;overflow-y:auto;font:11px/1.5 var(--mono)}
+.ll{white-space:nowrap}.lt{color:#475569}.li{color:#22d3ee}.lw{color:#fbbf24}.le{color:#f87171}
+</style>
+</head>
+<body>
+<header>
+  <h1>RA605 MONITOR</h1>
+  <span id="cb" class="bdg b-off">NULL</span>
+  <span id="wb" class="bdg b-ws-off">WS 離線</span>
+  <div class="sp"></div>
+  <span class="clk" id="clk"></span>
+</header>
+<div class="left">
+  <div class="stit">各軸狀態</div><div id="jcards"></div>
+  <div class="stit" style="margin-top:10px">手動控制</div><div id="sliders"></div>
+  <button class="btn" onclick="sendCmd('home')">🏠 回原點</button>
+  <button class="btn" onclick="sendCmd('ralm')">⚡ 清除警報</button>
+  <button class="btn dg" onclick="sendCmd('estop')">🛑 緊急停止</button>
+</div>
+<div class="vp" id="vp">
+  <div class="vpl">拖曳旋轉 ｜ 滾輪縮放</div>
+  <div class="vp-load" id="loadTxt">載入 STL 模型中...</div>
+</div>
+<div class="right">
+  <div class="stit">末端位姿 (EE)</div><div id="eeI"></div>
+  <div class="stit" style="margin-top:12px">齊次矩陣 4×4</div>
+  <div class="mg" id="matG"></div>
+</div>
+<div class="lp" id="logP"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ═══════════════════════════════════════
+// Binary STL Loader
+// ═══════════════════════════════════════
+function loadSTL(url) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.responseType = 'arraybuffer';
+    xhr.onload = function() {
+      if (xhr.status === 200 || xhr.status === 0) {
+        try {
+          const buf = xhr.response;
+          if (!buf || buf.byteLength < 84) { reject(new Error('檔案太小')); return; }
+          const dv = new DataView(buf);
+          const faces = dv.getUint32(80, true);
+          const expectedSize = 84 + faces * 50;
+          if (buf.byteLength < expectedSize) { reject(new Error(`檔案大小不符: ${buf.byteLength} < ${expectedSize}`)); return; }
+
+          const verts = new Float32Array(faces * 9);
+          const norms = new Float32Array(faces * 9);
+          let off = 84;
+          for (let i = 0; i < faces; i++) {
+            const nx = dv.getFloat32(off, true); off += 4;
+            const ny = dv.getFloat32(off, true); off += 4;
+            const nz = dv.getFloat32(off, true); off += 4;
+            for (let j = 0; j < 3; j++) {
+              verts[i*9+j*3]   = dv.getFloat32(off, true); off += 4;
+              verts[i*9+j*3+1] = dv.getFloat32(off, true); off += 4;
+              verts[i*9+j*3+2] = dv.getFloat32(off, true); off += 4;
+              norms[i*9+j*3] = nx; norms[i*9+j*3+1] = ny; norms[i*9+j*3+2] = nz;
+            }
+            off += 2;
+          }
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute('position', new THREE.BufferAttribute(verts, 3));
+          geo.setAttribute('normal', new THREE.BufferAttribute(norms, 3));
+          resolve(geo);
+        } catch(e) { reject(e); }
+      } else {
+        reject(new Error(`HTTP ${xhr.status}: ${xhr.statusText}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('網路錯誤'));
+    xhr.ontimeout = () => reject(new Error('逾時'));
+    xhr.timeout = 10000;
+    xhr.send();
+  });
+}
+
+// ═══════════════════════════════════════
+// Constants
+// ═══════════════════════════════════════
+const COLORS = ['#ef4444','#f59e0b','#22c55e','#3b82f6','#a855f7','#ec4899'];
+const JNAMES = ['J1 Base','J2 Shoulder','J3 Elbow','J4 Wrist1','J5 Wrist2','J6 Wrist3'];
+const SNAMES = ['NULL','STOP','MOVING','ALARM'];
+const CNAMES = ['NULL','CONNING','CONNCET','CONNERR','READY','ALARM'];
+
+let S = {card:0, ang:[0,0,0,0,0,0], spd:[0,0,0,0,0,0], ms:[0,0,0,0,0,0], ql:[0,0,0,0,0,0]};
+let ws = null;
+
+// ═══════════════════════════════════════
+// Three.js
+// ═══════════════════════════════════════
+const vp = document.getElementById('vp');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0e17);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 50);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.shadowMap.enabled = true;
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+vp.appendChild(renderer.domElement);
+
+scene.add(new THREE.AmbientLight(0x556677, 0.8));
+const dL = new THREE.DirectionalLight(0xffffff, 1.0);
+dL.position.set(2, 3, 2); dL.castShadow = true; scene.add(dL);
+scene.add(new THREE.PointLight(0x22d3ee, 0.3, 10));
+const grid = new THREE.GridHelper(2, 20, 0x1e293b, 0x111827);
+scene.add(grid);
+
+// ═══════════════════════════════════════
+// URDF Joint definitions
+// ═══════════════════════════════════════
+const JOINTS = [
+  { name:'Joint1', xyz:[-0.0045962,0,0.22398], rpy:[0,-0.034907,0], axis:[0,0,-1] },
+  { name:'Joint2', xyz:[0.03,0.0383,0.151],    rpy:[1.5708,0,0],    axis:[0,0,-1] },
+  { name:'Joint3', xyz:[0,0.34,-0.011],         rpy:[0,0,0],         axis:[0,0,1]  },
+  { name:'Joint4', xyz:[0.099,0.04,0.0493],     rpy:[0,1.5708,0],    axis:[0,0,-1] },
+  { name:'Joint5', xyz:[-0.032,0,0.239],        rpy:[Math.PI,-Math.PI/2,Math.PI], axis:[0,0,-1] },
+  { name:'Joint6', xyz:[0,-0.0685,-0.032],      rpy:[1.5708,0,0],    axis:[0,0,-1] },
+];
+
+const LINK_COLORS = [0xe3c8b5, 0xc9d0ee, 0xc9d0ee, 0xc9d0ee, 0xc9d0ee, 0xc9d0ee, 0xbebcba];
+const STL_FILES = ['base_link.STL','Link1.STL','Link2.STL','Link3.STL','Link4.STL','Link5.STL','Link6.STL'];
+
+// ═══════════════════════════════════════
+// Fallback geometry (when STL fails or file:// mode)
+// Draws joint spheres + cylinders connecting to next joint
+// ═══════════════════════════════════════
+function createFallbackLink(index, jointIndex) {
+  const group = new THREE.Group();
+  const jColor = jointIndex >= 0 ? new THREE.Color(COLORS[jointIndex]) : new THREE.Color(0x667788);
+
+  // Base platform
+  if (jointIndex < 0) {
+    const baseGeo = new THREE.CylinderGeometry(0.06, 0.07, 0.03, 20);
+    const baseMat = new THREE.MeshPhongMaterial({color: 0x334155, shininess: 30});
+    const baseMesh = new THREE.Mesh(baseGeo, baseMat);
+    baseMesh.position.y = 0.015;
+    group.add(baseMesh);
+  }
+
+  // Joint sphere
+  if (jointIndex >= 0) {
+    const r = jointIndex < 3 ? 0.03 : 0.022;
+    const sGeo = new THREE.SphereGeometry(r, 14, 14);
+    const sMat = new THREE.MeshPhongMaterial({color: jColor, emissive: jColor.clone().multiplyScalar(0.25), shininess: 80});
+    const s = new THREE.Mesh(sGeo, sMat);
+    s.castShadow = true;
+    group.add(s);
+  }
+
+  // Connecting cylinder toward next joint origin (in local frame)
+  let target; // xyz of next joint in THIS link's local frame
+  if (jointIndex < 0) {
+    target = JOINTS[0].xyz; // base → J1
+  } else if (jointIndex < 5) {
+    target = JOINTS[jointIndex + 1].xyz; // Ji → Ji+1
+  } else {
+    target = [0, 0, 0.088]; // J6 → EE
+  }
+
+  const len = Math.sqrt(target[0]**2 + target[1]**2 + target[2]**2);
+  if (len > 0.005) {
+    const r = jointIndex < 0 ? 0.022 : (jointIndex < 3 ? 0.018 : 0.012);
+    const cGeo = new THREE.CylinderGeometry(r, r, len, 10);
+    const cMat = new THREE.MeshPhongMaterial({color: 0x1e293b, shininess: 20});
+    const cyl = new THREE.Mesh(cGeo, cMat);
+    cyl.castShadow = true;
+
+    // CylinderGeometry is along Y-axis by default.
+    // We need to rotate it to point from origin to target.
+    const dir = new THREE.Vector3(target[0], target[1], target[2]).normalize();
+    const up = new THREE.Vector3(0, 1, 0);
+    const quat = new THREE.Quaternion().setFromUnitVectors(up, dir);
+    cyl.quaternion.copy(quat);
+
+    // Position at midpoint
+    cyl.position.set(target[0]/2, target[1]/2, target[2]/2);
+    group.add(cyl);
+  }
+
+  return group;
+}
+
+// ═══════════════════════════════════════
+// Build robot structure
+// ═══════════════════════════════════════
+const robotRoot = new THREE.Group();
+scene.add(robotRoot);
+
+const baseMeshGroup = new THREE.Group();
+robotRoot.add(baseMeshGroup);
+
+const jointGroups = [];
+const jointPivots = [];
+
+let parentGroup = baseMeshGroup;
+for (let i = 0; i < 6; i++) {
+  const j = JOINTS[i];
+  const pivot = new THREE.Group();
+  pivot.position.set(j.xyz[0], j.xyz[1], j.xyz[2]);
+  pivot.quaternion.setFromEuler(new THREE.Euler(j.rpy[0], j.rpy[1], j.rpy[2], 'XYZ'));
+  parentGroup.add(pivot);
+
+  const jg = new THREE.Group();
+  pivot.add(jg);
+  jointPivots.push(pivot);
+  jointGroups.push(jg);
+  parentGroup = jg;
+}
+
+// EE
+const eeGroup = new THREE.Group();
+eeGroup.position.set(0, 0, 0.02);
+jointGroups[5].add(eeGroup);
+eeGroup.add(new THREE.AxesHelper(0.06));
+
+// ═══════════════════════════════════════
+// Load STL meshes with fallback
+// ═══════════════════════════════════════
+let loadedCount = 0;
+const totalMeshes = 7;
+const isFileProtocol = location.protocol === 'file:';
+
+async function loadAllMeshes() {
+  if (isFileProtocol) {
+    addLog('WARN', '偵測到 file:// 協定 — 瀏覽器禁止載入本地 STL 檔案');
+    addLog('INFO', '使用替代幾何模型（關節球 + 連桿圓柱）');
+    addLog('INFO', '如需 STL 模型：啟動 Robot.MockConsole → 瀏覽器開啟 http://localhost:5850');
+    for (let i = 0; i < totalMeshes; i++) {
+      const parent = i === 0 ? baseMeshGroup : jointGroups[i - 1];
+      parent.add(createFallbackLink(i, i === 0 ? -1 : i - 1));
+    }
+    document.getElementById('loadTxt').style.opacity = '0';
+    setTimeout(() => document.getElementById('loadTxt').style.display = 'none', 500);
+    return;
+  }
+
+  for (let i = 0; i < totalMeshes; i++) {
+    const parent = i === 0 ? baseMeshGroup : jointGroups[i - 1];
+    const url = 'meshes/' + STL_FILES[i];
+    try {
+      const geo = await loadSTL(url);
+      const mat = new THREE.MeshPhongMaterial({color: LINK_COLORS[i], shininess: 40, specular: 0x222222});
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      parent.add(mesh);
+      addLog('INFO', `✓ ${STL_FILES[i]} (${(geo.attributes.position.count/3)|0} 面)`);
+    } catch(err) {
+      addLog('WARN', `✗ ${STL_FILES[i]}: ${err.message} — 使用替代模型`);
+      parent.add(createFallbackLink(i, i === 0 ? -1 : i - 1));
+    }
+    loadedCount++;
+    document.getElementById('loadTxt').textContent = `載入模型 ${loadedCount}/${totalMeshes}...`;
+  }
+  document.getElementById('loadTxt').style.opacity = '0';
+  setTimeout(() => document.getElementById('loadTxt').style.display = 'none', 500);
+}
+
+loadAllMeshes();
+
+// ═══════════════════════════════════════
+// Update joint angles
+// ═══════════════════════════════════════
+function updateArm(angDeg) {
+  for (let i = 0; i < 6; i++) {
+    const rad = angDeg[i] * Math.PI / 180;
+    const ax = JOINTS[i].axis;
+    const sign = ax[0] !== 0 ? ax[0] : (ax[1] !== 0 ? ax[1] : ax[2]);
+    jointGroups[i].rotation.set(0, 0, rad * sign);
+  }
+}
+
+function getEEWorldPos() {
+  eeGroup.updateWorldMatrix(true, false);
+  const p = new THREE.Vector3();
+  eeGroup.getWorldPosition(p);
+  return p;
+}
+
+// ═══════════════════════════════════════
+// Camera orbit
+// ═══════════════════════════════════════
+let drag=false, pm={x:0,y:0};
+let cTh=Math.PI/4, cPh=Math.PI/5, cD=2.0;
+const cTgt = new THREE.Vector3(0, 0.4, 0);
+
+vp.addEventListener('mousedown', e=>{drag=true;pm={x:e.clientX,y:e.clientY}});
+window.addEventListener('mouseup', ()=>drag=false);
+vp.addEventListener('mousemove', e=>{
+  if(!drag)return;
+  cTh-=(e.clientX-pm.x)*0.005;
+  cPh=Math.max(0.05,Math.min(1.5,cPh+(e.clientY-pm.y)*0.005));
+  pm={x:e.clientX,y:e.clientY};
+});
+vp.addEventListener('wheel',e=>{cD=Math.max(0.5,Math.min(6,cD+e.deltaY*0.002));e.preventDefault()},{passive:false});
+
+function updateCam(){
+  camera.position.set(
+    cTgt.x+cD*Math.sin(cPh)*Math.cos(cTh),
+    cTgt.y+cD*Math.cos(cPh),
+    cTgt.z+cD*Math.sin(cPh)*Math.sin(cTh));
+  camera.lookAt(cTgt);
+}
+
+// ═══════════════════════════════════════
+// UI
+// ═══════════════════════════════════════
+function initUI(){
+  const jc=document.getElementById('jcards');
+  for(let i=0;i<6;i++) jc.innerHTML+=`<div class="jc" id="jc${i}"><div class="jh"><span class="jn" style="color:${COLORS[i]}">${JNAMES[i]}</span><span class="js sn" id="js${i}">NULL</span></div><div class="jv" id="jv${i}">0.000°</div><div class="jsp" id="jp${i}">ω 0 ｜ Q 0</div><div class="jbb"><div class="jbf" id="jb${i}" style="width:50%"></div></div></div>`;
+  const sl=document.getElementById('sliders');
+  for(let i=0;i<6;i++) sl.innerHTML+=`<div class="sr"><label style="color:${COLORS[i]}">J${i+1}</label><input type="range" min="-180" max="180" value="0" step="0.5" id="sl${i}" oninput="onSl(${i},this.value)"><span class="sv" id="sv${i}">0.0°</span></div>`;
+  const mg=document.getElementById('matG');
+  for(let i=0;i<16;i++) mg.innerHTML+=`<div class="mc" id="m${i}">0</div>`;
+}
+
+function updateUI(){
+  const cb=document.getElementById('cb');
+  cb.textContent=CNAMES[S.card]||'NULL';
+  cb.className='bdg '+(S.card===4?'b-ok':S.card===5?'b-err':S.card>=1?'b-warn':'b-off');
+  for(let i=0;i<6;i++){
+    const ms=S.ms[i];
+    document.getElementById(`jc${i}`).className='jc'+(ms===2?' mv':ms===3?' al':'');
+    const se=document.getElementById(`js${i}`);
+    se.textContent=SNAMES[ms]||'NULL';
+    se.className='js '+(ms===0?'sn':ms===1?'ss':ms===2?'sm':'sa');
+    document.getElementById(`jv${i}`).textContent=S.ang[i].toFixed(3)+'°';
+    document.getElementById(`jp${i}`).textContent=`ω ${S.spd[i]} ｜ Q ${S.ql[i]}`;
+    document.getElementById(`jb${i}`).style.width=((S.ang[i]+180)/360*100).toFixed(1)+'%';
+  }
+  const p=getEEWorldPos();
+  document.getElementById('eeI').innerHTML=`<div class="er"><span class="el">X</span><span class="ev">${(p.x*1000).toFixed(1)} mm</span></div><div class="er"><span class="el">Y</span><span class="ev">${(p.z*1000).toFixed(1)} mm</span></div><div class="er"><span class="el">Z</span><span class="ev">${(p.y*1000).toFixed(1)} mm</span></div>`;
+  eeGroup.updateWorldMatrix(true,false);
+  const wm=eeGroup.matrixWorld.elements;
+  for(let c=0;c<4;c++)for(let r=0;r<4;r++) document.getElementById(`m${r*4+c}`).textContent=wm[c*4+r].toFixed(3);
+  document.getElementById('clk').textContent=new Date().toLocaleTimeString('zh-TW',{hour12:false});
+}
+
+// ═══════════════════════════════════════
+// Controls
+// ═══════════════════════════════════════
+function onSl(i,v){
+  v=parseFloat(v);
+  document.getElementById(`sv${i}`).textContent=v.toFixed(1)+'°';
+  S.ang[i]=v;
+  if(ws&&ws.readyState===1) ws.send(JSON.stringify({cmd:'setAngle',axis:i,angle:v}));
+}
+
+function sendCmd(c){
+  if(ws&&ws.readyState===1) ws.send(JSON.stringify({cmd:c}));
+  if(c==='home'){for(let i=0;i<6;i++){S.ang[i]=0;document.getElementById(`sl${i}`).value=0;document.getElementById(`sv${i}`).textContent='0.0°';}addLog('INFO','回原點');}
+  if(c==='estop') addLog('WARN','🛑 緊急停止');
+  if(c==='ralm') addLog('INFO','清除警報');
+}
+
+// ═══════════════════════════════════════
+// WebSocket
+// ═══════════════════════════════════════
+function connectWS(){
+  const h=location.hostname||'localhost';
+  try{ws=new WebSocket(`ws://${h}:5850/`);}catch(e){return;}
+  ws.onopen=()=>{document.getElementById('wb').textContent='WS 連線';document.getElementById('wb').className='bdg b-ws-on';addLog('INFO','WebSocket 已連線');};
+  ws.onmessage=e=>{try{
+    const d=JSON.parse(e.data);
+    if(d.type==='state'){
+      S.card=d.cardState??S.card;
+      if(d.pos) S.ang=d.pos.map(v=>v/1000);
+      S.spd=d.speed??S.spd; S.ms=d.motorState??S.ms; S.ql=d.queueLen??S.ql;
+      for(let i=0;i<6;i++){document.getElementById(`sl${i}`).value=S.ang[i];document.getElementById(`sv${i}`).textContent=S.ang[i].toFixed(1)+'°';}
+    }else if(d.type==='log') addLog(d.level||'INFO',d.message);
+  }catch(err){}};
+  ws.onclose=()=>{document.getElementById('wb').textContent='WS 離線';document.getElementById('wb').className='bdg b-ws-off';addLog('WARN','斷線，3s重連...');setTimeout(connectWS,3000);};
+  ws.onerror=()=>ws.close();
+}
+
+// ═══════════════════════════════════════
+// Log
+// ═══════════════════════════════════════
+const logBuf=[];
+function addLog(lv,msg){
+  const ts=new Date().toLocaleTimeString('zh-TW',{hour12:false,fractionalSecondDigits:3});
+  const c=lv==='WARN'?'lw':lv==='ERROR'?'le':'li';
+  logBuf.push(`<div class="ll"><span class="lt">[${ts}]</span> <span class="${c}">[${lv}]</span> ${msg}</div>`);
+  if(logBuf.length>300)logBuf.shift();
+  const lp=document.getElementById('logP');
+  lp.innerHTML=logBuf.join('');
+  lp.scrollTop=lp.scrollHeight;
+}
+
+// ═══════════════════════════════════════
+// Render
+// ═══════════════════════════════════════
+function onResize(){const r=vp.getBoundingClientRect();camera.aspect=r.width/r.height;camera.updateProjectionMatrix();renderer.setSize(r.width,r.height);}
+window.addEventListener('resize',onResize);
+
+function animate(){
+  requestAnimationFrame(animate);
+  updateCam(); updateArm(S.ang); updateUI();
+  renderer.render(scene,camera);
+}
+
+initUI(); onResize(); animate(); connectWS();
+addLog('INFO','RA605 3D 監控介面已啟動');
+addLog('INFO','Slider 可即時控制各軸（離線/連線模式皆可）');
+</script>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Robot.Motion.RA605</RootNamespace>
+    <AssemblyName>Robot.Motion.RA605</AssemblyName>
+    <Description>RA605 高階運動控制層 — 含正逆運動學與末端運動規劃</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Robot.Core\Robot.Core.csproj" />
+  </ItemGroup>
+
+</Project>

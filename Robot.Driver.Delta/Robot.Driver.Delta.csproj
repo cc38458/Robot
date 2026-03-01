@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Robot.Driver.Delta</RootNamespace>
+    <AssemblyName>Robot.Driver.Delta</AssemblyName>
+    <Description>Delta EtherCAT 軸卡驅動層 — 含通訊線程、指令隊列、看門狗</Description>
+  </PropertyGroup>
+
+  <!-- 
+    Mock 切換機制（三種觸發方式，任一即可）：
+    1. 組態名稱為 Mock：dotnet build -c Mock 
+    2. 傳入 UseMock=true：dotnet build -p:UseMock=true
+    3. DefineConstants 含 MOCK（被引用專案透過 AdditionalProperties 傳入）
+  -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Mock' Or '$(UseMock)' == 'true' Or $(DefineConstants.Contains('MOCK'))">
+    <DefineConstants>$(DefineConstants);MOCK</DefineConstants>
+    <_IsMockBuild>true</_IsMockBuild>
+  </PropertyGroup>
+
+  <!-- 
+    兩個 DLL 檔案都保留在方案總管中，但編譯時互斥：
+    正式版：編譯 x64，Mock 設為 None（可見但不編譯）
+    模擬版：編譯 Mock，x64 設為 None
+  -->
+  <ItemGroup Condition="'$(_IsMockBuild)' != 'true'">
+    <Compile Remove="EtherCAT_DLL_Mock.cs" />
+    <None Include="EtherCAT_DLL_Mock.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(_IsMockBuild)' == 'true'">
+    <Compile Remove="EtherCAT_DLL_x64.cs" />
+    <None Include="EtherCAT_DLL_x64.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Robot.Core\Robot.Core.csproj" />
+  </ItemGroup>
+
+</Project>
