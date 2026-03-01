@@ -218,7 +218,7 @@ namespace EtherCAT_DLL_x64
             ref ushort AxisArray, ref ushort SlotArray)
         {
             MockLog($"CSP_PVT_Sync_Move({AxisNum}軸同步)");
-            for (int i = 0; i < Math.Min(AxisNum, 6); i++) _mdone[i] = 2;
+            for (int i = 0; i < Math.Min((int)AxisNum, 6); i++) _mdone[i] = 2;
             Task.Run(async () =>
             {
                 await Task.Delay(300);

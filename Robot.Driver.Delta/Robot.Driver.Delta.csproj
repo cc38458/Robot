@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <Configurations>Debug;Release;Mock</Configurations>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -9,15 +10,18 @@
     <Description>Delta EtherCAT 軸卡驅動層 — 含通訊線程、指令隊列、看門狗</Description>
   </PropertyGroup>
 
-  <!-- 
-    Mock 切換機制（三種觸發方式，任一即可）：
-    1. 組態名稱為 Mock：dotnet build -c Mock 
-    2. 傳入 UseMock=true：dotnet build -p:UseMock=true
-    3. DefineConstants 含 MOCK（被引用專案透過 AdditionalProperties 傳入）
+  <!--
+    Mock 切換機制（任一條件成立即使用 Mock）：
+    1. 組態名稱為 Mock
+    2. 傳入 UseMock=true（例如被 Robot.MockConsole 參考時）
   -->
-  <PropertyGroup Condition="'$(Configuration)' == 'Mock' Or '$(UseMock)' == 'true' Or $(DefineConstants.Contains('MOCK'))">
-    <DefineConstants>$(DefineConstants);MOCK</DefineConstants>
+  <PropertyGroup>
+    <_IsMockBuild>false</_IsMockBuild>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Mock' Or '$(UseMock)' == 'true'">
     <_IsMockBuild>true</_IsMockBuild>
+    <DefineConstants>$(DefineConstants);MOCK</DefineConstants>
   </PropertyGroup>
 
   <!-- 

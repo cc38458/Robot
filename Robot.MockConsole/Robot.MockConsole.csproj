@@ -2,6 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <Configurations>Debug;Release;Mock</Configurations>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -27,7 +28,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Robot.Core\Robot.Core.csproj" />
-    <ProjectReference Include="..\Robot.Driver.Delta\Robot.Driver.Delta.csproj" AdditionalProperties="UseMock=true" />
+    <ProjectReference Include="..\Robot.Driver.Delta\Robot.Driver.Delta.csproj"
+                      AdditionalProperties="UseMock=true" />
   </ItemGroup>
 
 </Project>
