@@ -1,183 +1,115 @@
-# Robot RA605 開發指南（上位機專用）
+# Robot RA605
 
-本專案已整理為「上位機可直接引用一個專案」的模式：
+RA605 六軸機械手臂控制框架（C# / .NET 8）。
 
-- 你只需要引用：`Robot.Motion.RA605`
-- 你會用到的高階入口類別：`RA605RobotApp`
-- 可用參數決定後端：`Real`（真實 EtherCAT）或 `Mock`（虛擬手臂）
-- 可呼叫方法啟動 Web 監控頁：唯讀，不可控制手臂
+本專案提供統一的高階控制入口，支援執行期切換實體與模擬後端，並提供唯讀 Web 監控能力。
 
----
+## 1. 目標與範圍
 
-## 1. 你要引用哪個專案
+- 提供可重用之手臂控制元件，供上位應用程式整合。
+- 提供統一介面管理連線、初始化、安全控制與運動控制。
+- 支援 `Real`（EtherCAT 實體）與 `Mock`（虛擬）後端切換。
+- 提供唯讀 Web 監控頁顯示手臂狀態與末端姿態。
 
-請在你的上位機專案（WinForms / WPF / Console / ASP.NET）中引用：
+## 2. 專案結構
 
-- `Robot.Motion.RA605.csproj`
+```text
+Robot.sln
+├─ Robot.Core
+├─ Robot.Driver.Delta
+├─ Robot.Motion.RA605
+├─ Robot.MockConsole
+├─ Demo.StepConsole
+└─ axis_zero_config.json
+```
 
-這個專案會自動帶入底層相依：
+- `Robot.Core`：核心列舉、介面、資料模型、日誌元件。
+- `Robot.Driver.Delta`：EtherCAT 驅動層，含 Real/Mock 後端與監控伺服器。
+- `Robot.Motion.RA605`：高階控制入口。
+- `Robot.MockConsole`：Web 監控。
+- `Demo.StepConsole`：逐步操作範例程式。
 
-- `Robot.Driver.Delta`
-- `Robot.Core`
+## 3. 高階控制入口
 
----
+建議上位應用程式直接引用 `Robot.Motion.RA605`，並實作 `RA605RobotApp`。
 
-## 2. 核心概念（你只要記這三件事）
+### 3.1 後端模式
 
-1. `RA605RobotApp` 是唯一入口（高階控制）
-2. 建立物件時指定 `RobotBackendMode.Real` 或 `RobotBackendMode.Mock`
-3. `StartWebMonitor()` 只做監看，不會控制手臂
+- `RobotBackendMode.Real`：使用 `EtherCAT_DLL_x64`（實體控制）。
+- `RobotBackendMode.Mock`：使用 `EtherCAT_DLL_Mock`（模擬控制）。
 
----
+### 3.2 主要能力
 
-## 3. 最小可用範例（可直接複製）
+- 生命週期：`Connect()`、`Initialize()`、`End()`
+- 安全控制：`Estop()`、`Ralm()`
+- 軸控制：`MoveAxisAbsolute()`、`MoveAxisRelative()`、`MoveHome()`
+- 末端控制：`MoveToPosture()`、`MoveRelativeEndEffector()`、`Start/Update/StopContinuousMove()`
+- 監控：`StartWebMonitor()`、`StopWebMonitor()`
+
+## 4. Web 監控
+
+監控頁為只讀模式，僅顯示狀態資訊，不提供控制能力。
+
+- 預設 URL：`http://localhost:5850`
+- 顯示內容：軸角度、速度、狀態、佇列長度、末端位置與姿態矩陣
+- 不接受手臂控制指令
+
+## 5. 最小整合範例
 
 ```csharp
 using Robot.Motion.RA605;
 
-class Program
-{
-    static void Main()
-    {
-        // 1) 建立高階控制器：Mock / Real 二選一
-        using var robot = new RA605RobotApp(
-            backendMode: RobotBackendMode.Mock, // 改成 Real 就連真實手臂
-            zeroConfigPath: "axis_zero_config.json",
-            toolLength: 60f
-        );
+using var robot = new RA605RobotApp(
+    backendMode: RobotBackendMode.Mock,
+    zeroConfigPath: "axis_zero_config.json",
+    toolLength: 60f);
 
-        // 2) 連線
-        if (!robot.Connect())
-        {
-            Console.WriteLine($"Connect 失敗，狀態：{robot.AxisCardState}");
-            return;
-        }
+if (!robot.Connect()) return;
+if (!robot.Initialize()) return;
 
-        // 3) 初始化
-        if (!robot.Initialize())
-        {
-            Console.WriteLine("Initialize 失敗");
-            return;
-        }
+string monitorUrl = robot.StartWebMonitor(5850);
+robot.MoveAxisAbsolute(axis: 0, angleMdeg: 30000, constVel: 30000);
+robot.MoveHome();
 
-        // 4) 啟動唯讀 Web 監控
-        //    monitor.html 預設會自動找常見位置，也可手動指定路徑
-        string url = robot.StartWebMonitor(port: 5850);
-        Console.WriteLine($"Web 監控：{url}");
-
-        // 5) 下達控制命令（範例：J1 到 30 度）
-        robot.MoveAxisAbsolute(axis: 0, angleMdeg: 30000, constVel: 30000);
-
-        Console.WriteLine("按 Enter 結束");
-        Console.ReadLine();
-
-        robot.End();
-    }
-}
+robot.End();
 ```
 
----
+## 6. 執行範例程式
 
-## 4. Real / Mock 切換方式
+```bash
+dotnet run --project Demo.StepConsole/Demo.StepConsole.csproj
+```
 
-建立 `RA605RobotApp` 時設定：
+執行流程：
 
-- `RobotBackendMode.Real`：使用 `EtherCAT_DLL_x64`（真實手臂）
-- `RobotBackendMode.Mock`：使用 `EtherCAT_DLL_Mock`（虛擬手臂）
+1. 連線模擬手臂
+2. 初始化
+3. 啟動 Web 監控
+4. 第一軸移動
+5. 回原點
+6. 多軸同動
+7. 回原點
+8. 關閉手臂
 
-也就是說：
+## 7. 單位規範
 
-- 你的上位機控制程式可以完全不改，只換一個參數就切後端
-
----
-
-## 5. Web 監控的重要變更（已符合你的需求）
-
-目前 Web 頁面已改為唯讀監看：
-
-- 已移除拉桿
-- 已移除按鈕（回原點 / 清警報 / 急停）
-- 監控頁不會送控制指令到手臂
-- 只顯示狀態（角度、速度、末端姿態）
-
-因此現在架構是：
-
-- 虛擬/真實手臂負責接收控制命令並更新姿態
-- Web 監控只讀取當前姿態來展示
-
----
-
-## 6. `RA605RobotApp` 常用方法
-
-生命週期：
-
-- `Connect()`
-- `Initialize()`
-- `End()`
-
-安全：
-
-- `Estop()`
-- `Ralm()`
-
-軸控制：
-
-- `MoveAxisAbsolute(axis, angleMdeg, constVel, tAcc, tDec)`
-- `MoveAxisRelative(axis, deltaAngleMdeg, constVel, tAcc, tDec)`
-- `MoveHome(constVel, tAcc, tDec)`
-
-末端控制：
-
-- `MoveToPosture(targetPosture, moveTimeMs)`
-- `MoveRelativeEndEffector(...)`
-- `StartContinuousMove(...)`
-- `UpdateContinuousMove(...)`
-- `StopContinuousMove()`
-
-監控：
-
-- `StartWebMonitor(port, htmlPath)`
-- `StopWebMonitor()`
-
-狀態讀取：
-
-- `AxisCardState`
-- `Pos`（mdeg）
-- `Speed`（mdeg/s）
-- `MotorState`
-- `QueueLength`
-- `EndEffectorPosition`
-- `EndEffectorPosture`
-
----
-
-## 7. 單位說明（非常重要）
-
-- 角度：`mdeg`（千分之一度）
-  - `1° = 1000 mdeg`
+- 角度：`mdeg`（1° = 1000 mdeg）
 - 角速度：`mdeg/s`
-- 距離：`mm`
-- 時間：`s`（例如 `tAcc = 0.3`）
+- 長度：`mm`
+- 時間：`s`（部分 API 另有 `ms` 參數）
 
-例如：45 度要輸入 `45000`。
+## 8. 環境需求
 
----
+- .NET SDK 8.0 或以上
+- Windows（Real 模式）
+- 可執行 .NET 8 的環境（Mock 模式）
 
-## 8. 新手建議開發流程
+## 9. 主要檔案
 
-1. 先用 `Mock` 把流程跑通
-2. 確認 UI、狀態、例外處理都正常
-3. 再切 `Real` 做低速單軸測試
-4. 最後才做多軸、連續運動
-
----
-
-## 9. 主要檔案位置
-
-- 高階入口：`Robot.Motion.RA605/RA605RobotApp.cs`
-- 後端模式列舉：`Robot.Motion.RA605/RobotBackendMode.cs`
-- 驅動執行緒：`Robot.Driver.Delta/CommThread.cs`
-- Real/Mock 轉接：`Robot.Driver.Delta/EtherCatApiAdapter.cs`
-- 唯讀監控伺服器：`Robot.Driver.Delta/MonitorServer.cs`
-- Web 監控頁：`Robot.MockConsole/monitor.html`
-
+- `Robot.Motion.RA605/RA605RobotApp.cs`
+- `Robot.Motion.RA605/RobotBackendMode.cs`
+- `Robot.Driver.Delta/CommThread.cs`
+- `Robot.Driver.Delta/EtherCatApiAdapter.cs`
+- `Robot.Driver.Delta/MonitorServer.cs`
+- `Robot.MockConsole/monitor.html`
+- `Demo.StepConsole/Program.cs`

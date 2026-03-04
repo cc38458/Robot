@@ -9,6 +9,11 @@ obj/
 logs/
 **/logs/
 
+# Local generated / analysis outputs
+codex/
+RA605_Technical_Report.txt
+axis_zero_config.json
+
 # User-specific
 *.user
 *.suo
