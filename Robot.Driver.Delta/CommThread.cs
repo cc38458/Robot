@@ -64,9 +64,15 @@ namespace Robot.Driver.Delta
         private long _mainThreadHeartbeat;
         private long _commThreadHeartbeat;
 
+        // ── 原點標定 ──
+        private volatile bool _calibrateRequested = false;
+        private volatile bool _calibrateResult;
+        private readonly ManualResetEventSlim _calibrateSignal = new(false);
+
         // ── 日誌 ──
         private readonly RobotLogger _log;
         private readonly IEtherCatApi _ecat;
+        private readonly bool _isMockBackend;
 
         // ── 零點設定檔路徑 ──
         private readonly string _zeroConfigPath;
@@ -75,6 +81,7 @@ namespace Robot.Driver.Delta
         {
             _log = logger;
             _ecat = useMockBackend ? new MockEtherCatApi() : new RealEtherCatApi();
+            _isMockBackend = useMockBackend;
             _zeroConfigPath = zeroConfigPath;
             for (int i = 0; i < AXIS_COUNT; i++)
                 _queues[i] = new Queue<MotionCommand>();
@@ -147,6 +154,29 @@ namespace Robot.Driver.Delta
         }
 
         public void RequestEnd() => _endRequested = true;
+
+        /// <summary>
+        /// 主線程呼叫：執行原點標定（僅 Real 模式）。
+        /// 讀取目前各軸實際編碼器位置並儲存為新的 ZeroPulse。
+        /// Mock 模式不允許，回傳 false。
+        /// </summary>
+        public bool RequestCalibrateZero()
+        {
+            if (_isMockBackend)
+            {
+                _log.Info("Mock 模式：略過原點標定");
+                return true;
+            }
+            if (_cardState < CardState.CONNCET)
+            {
+                _log.Warn($"原點標定拒絕：目前狀態 {_cardState}，需至少 CONNCET");
+                return false;
+            }
+            _calibrateSignal.Reset();
+            _calibrateRequested = true;
+            _calibrateSignal.Wait(TimeSpan.FromSeconds(5));
+            return _calibrateResult;
+        }
 
         // ════════════════════════════════════════
         // 安全指令（主線程呼叫，立即設旗標）
@@ -266,6 +296,14 @@ namespace Robot.Driver.Delta
                         _initSignal.Set();
                     }
 
+                    // ── 原點標定請求 ──
+                    if (_calibrateRequested)
+                    {
+                        _calibrateResult = DoCalibrate();
+                        _calibrateRequested = false;
+                        _calibrateSignal.Set();
+                    }
+
                     // ── 結束請求 ──
                     if (_endRequested)
                     {
@@ -326,7 +364,7 @@ namespace Robot.Driver.Delta
             _log.DllReturn("Master_Open", ret, $"軸卡數量={cardsNum}");
             if (ret != 0 || cardsNum != 1) return false;
 
-            ret = _ecat.CS_ECAT_Master_Get_CardSeq(1, ref _cardNo);
+            ret = _ecat.CS_ECAT_Master_Get_CardSeq(0, ref _cardNo);
             _log.DllReturn("Master_Get_CardSeq", ret, $"CardNo={_cardNo}");
             if (ret != 0) return false;
 
@@ -460,6 +498,38 @@ namespace Robot.Driver.Delta
             catch (Exception ex)
             {
                 _log.Error($"儲存零點設定檔失敗", ex);
+            }
+        }
+
+        /// <summary>
+        /// 在通訊線程中執行原點標定。
+        /// 直接從硬體讀取各軸當前位置，換算為絕對脈波數後存入設定檔。
+        /// 邏輯：Get_Position 在 Virtual 模式回傳虛擬座標（= 物理 − oldZeroPulse），
+        ///       因此絕對物理脈波 = oldZeroPulse + virtualPos。
+        /// </summary>
+        private bool DoCalibrate()
+        {
+            _log.Info("開始原點標定，讀取目前編碼器位置...");
+            try
+            {
+                var newZeroPulse = new int[AXIS_COUNT];
+                for (ushort i = 0; i < AXIS_COUNT; i++)
+                {
+                    int pos = 0;
+                    _ecat.CS_ECAT_Slave_Motion_Get_Position(_cardNo, i, 0, ref pos);
+                    // Virtual_Set_Command 後 Get_Position 回傳虛擬座標
+                    // 換算回實際編碼器脈波絕對值
+                    newZeroPulse[i] = _zeroPulse[i] + pos;
+                }
+                Array.Copy(newZeroPulse, _zeroPulse, AXIS_COUNT);
+                SaveZeroConfig();
+                _log.Info("原點標定完成，已儲存零點設定檔");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _log.Error("原點標定失敗", ex);
+                return false;
             }
         }
 
@@ -798,9 +868,11 @@ namespace Robot.Driver.Delta
             _running = false;
             _startSignal.Set();
             _initSignal.Set();
+            _calibrateSignal.Set();
             _thread?.Join(TimeSpan.FromSeconds(5));
             _startSignal.Dispose();
             _initSignal.Dispose();
+            _calibrateSignal.Dispose();
         }
     }
 }

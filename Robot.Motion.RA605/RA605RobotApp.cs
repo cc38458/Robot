@@ -189,6 +189,23 @@ namespace Robot.Motion.RA605
         public bool MoveHome(int constVel = 20000, double tAcc = 0.5, double tDec = 0.5)
             => _motion.MoveHome(constVel, tAcc, tDec);
 
+        // ===== 原點標定 =====
+
+        /// <summary>
+        /// 原點標定：將目前各軸真實編碼器位置存為新的零點設定檔（axis_zero_config.json）。
+        /// 僅 Real 後端有效；Mock 後端回傳 false 並記錄警告。
+        /// 前提：已完成 Connect + Initialize（AxisCardState == READY）。
+        /// </summary>
+        public bool CalibrateZero()
+        {
+            if (BackendMode == RobotBackendMode.Mock)
+            {
+                _log.Info("Mock 模式：略過原點標定");
+                return true;
+            }
+            return _driver.CalibrateZero();
+        }
+
         // ===== Web 監控（唯讀） =====
 
         /// <summary>

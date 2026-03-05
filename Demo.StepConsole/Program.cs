@@ -12,31 +12,47 @@ internal static class Program
         Console.WriteLine("每個步驟執行完成後，按 Enter 進入下一步。\n");
 
         using var robot = new RA605RobotApp(
-            backendMode: RobotBackendMode.Mock,
+            backendMode: RobotBackendMode.Real,
             zeroConfigPath: "axis_zero_config.json",
             toolLength: 60f,
             logDirectory: "logs",
             logPrefix: "StepConsole");
 
-        RunStep("1) 開啟虛擬手臂（Connect）", () =>
+        RunStep("1) 開啟手臂（Connect）", () =>
         {
             if (!robot.Connect())
                 throw new InvalidOperationException($"Connect 失敗，狀態={robot.AxisCardState}");
             Console.WriteLine($"已連線，狀態：{robot.AxisCardState}");
         });
 
-        RunStep("2) 初始化（Initialize）", () =>
+        RunStep("2) 初始化（Initialize）＋開啟 Web 監控頁", () =>
         {
             if (!robot.Initialize())
                 throw new InvalidOperationException($"Initialize 失敗，狀態={robot.AxisCardState}");
             Console.WriteLine($"初始化完成，狀態：{robot.AxisCardState}");
-        });
 
-        RunStep("3) 開啟 Web 監控頁", () =>
-        {
+            int[] pos = robot.Pos;
+            Console.WriteLine("目前虛擬位置（校正後，單位 mdeg）：");
+            for (int i = 0; i < pos.Length; i++)
+                Console.WriteLine($"  J{i + 1}: {pos[i],10} mdeg  ({pos[i] / 1000.0,8:F3}°)");
+
             string url = robot.StartWebMonitor(5850);
             Console.WriteLine($"監控頁：{url}");
             Console.WriteLine("請用瀏覽器開啟網址查看手臂狀態（唯讀）。");
+        });
+
+        RunStep("3) 原點標定", () =>
+        {
+            if (robot.BackendMode != RobotBackendMode.Mock)
+            {
+                Console.WriteLine("請將手臂移動至機械原點，確認後按 Enter 繼續標定...");
+                Console.ReadLine();
+            }
+            bool ok = robot.CalibrateZero();
+            if (!ok) throw new InvalidOperationException("原點標定失敗");
+            Console.WriteLine(robot.BackendMode == RobotBackendMode.Mock
+                ? "Mock 模式：略過原點標定。"
+                : "原點標定完成，已更新 axis_zero_config.json。");
         });
 
         RunStep("4) 第一軸移動到 30 度", () =>
