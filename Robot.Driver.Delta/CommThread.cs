@@ -421,6 +421,11 @@ namespace Robot.Driver.Delta
             // 3. 對每軸設定
             for (ushort i = 0; i < AXIS_COUNT; i++)
             {
+                // Servo ON
+                ret = _ecat.CS_ECAT_Slave_Motion_Set_Svon(_cardNo, i, 0, 1);
+                _log.DllReturn("Set_Svon", ret, $"軸{i} ON");
+                if (ret != 0) return false;
+
                 // 設定 CSP 模式
                 ret = _ecat.CS_ECAT_Slave_Motion_Set_MoveMode(_cardNo, i, 0, 8);
                 _log.DllReturn("Set_MoveMode", ret, $"軸{i} → CSP");
@@ -439,11 +444,6 @@ namespace Robot.Driver.Delta
                 // 設定零點偏移
                 ret = _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Command(_cardNo, i, 0, -_zeroPulse[i]);
                 _log.DllReturn("Virtual_Set_Command", ret, $"軸{i}: 偏移={-_zeroPulse[i]}");
-
-                // Servo ON
-                ret = _ecat.CS_ECAT_Slave_Motion_Set_Svon(_cardNo, i, 0, 1);
-                _log.DllReturn("Set_Svon", ret, $"軸{i} ON");
-                if (ret != 0) return false;
 
                 lock (_stateLock) { _state[i] = MotorState.STOP; }
             }
