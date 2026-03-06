@@ -134,13 +134,16 @@ namespace Robot.Motion.RA605
             CleanMatrix(ref rMatrix);
 
             // 5. Z-Y-Z 歐拉角 → Axis4, Axis5, Axis6
-            var euler = EulerZYZ(rMatrix);
+            // 手腕旋轉 rMatrix_col = Rz(-a[3]) * Ry(-a[4]) * Rz(-a[5])
+            // EulerZYZ(Rz(α)*Ry(β)*Rz(γ)) 回傳 (α, β, γ) = (-a[3], -a[4], -a[5])
+            // 注意 β 可能被 acos 取正值，此時 α,γ 偏移 π，但 a[3]=-α, a[4]=-β, a[5]=-γ 仍正確
+            var euler = EulerZYZ(Matrix4x4.Transpose(rMatrix));
 
             // 6. 弧度轉角度
             return new float[]
             {
                 axis1 * RAD2DEG, axis2 * RAD2DEG, axis3 * RAD2DEG,
-                euler.X * RAD2DEG, euler.Y * RAD2DEG, euler.Z * RAD2DEG,
+                -euler.X * RAD2DEG, -euler.Y * RAD2DEG, -euler.Z * RAD2DEG,
             };
         }
 
@@ -178,7 +181,10 @@ namespace Robot.Motion.RA605
         public static float[] ExtractPosition(Matrix4x4 mat)
             => new[] { mat.M41, mat.M42, mat.M43 };
 
-        /// <summary>Z-Y-Z 歐拉角分解</summary>
+        /// <summary>
+        /// Z-Y-Z 歐拉角分解：M = Rz(α) * Ry(β) * Rz(γ)
+        /// 回傳 Vector3(α, β, γ)
+        /// </summary>
         private static Vector3 EulerZYZ(Matrix4x4 m)
         {
             const float eps = 1e-6f;
@@ -194,8 +200,8 @@ namespace Robot.Motion.RA605
             }
             else
             {
-                alpha = MathF.Atan2(m.M32, -m.M31);
-                gamma = MathF.Atan2(m.M23, m.M13);
+                alpha = MathF.Atan2(m.M23, m.M13);
+                gamma = MathF.Atan2(m.M32, -m.M31);
             }
             return new Vector3(alpha, beta, gamma);
         }

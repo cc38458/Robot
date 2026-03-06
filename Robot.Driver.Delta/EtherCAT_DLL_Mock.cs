@@ -4,6 +4,9 @@
 // 編譯符號 MOCK 時引用此檔，命名空間與類別名稱完全相同
 // ═══════════════════════════════════════════════════════════════════
 
+using System.Runtime.CompilerServices;
+using System.Text;
+
 namespace EtherCAT_DLL_Mock
 {
     public class CEtherCAT_Mock
@@ -19,6 +22,12 @@ namespace EtherCAT_DLL_Mock
         private static readonly ushort[] _bufferLength = new ushort[6];
         private static bool _initialized = false;
 
+        // ── PVTComplete Config 暫存（供 Sync_Move 使用）──
+        private static readonly int[][] _pvtPos     = new int[6][];
+        private static readonly int[][] _pvtTime    = new int[6][];
+        private static readonly int[]   _pvtCnt     = new int[6];
+        private static readonly int[]   _pvtEndVel  = new int[6];
+
         // ── 模擬控制方法（測試用） ──
         public static void Mock_SetVerbose(bool verbose) => _verbose = verbose;
         public static void Mock_SetShowPolling(bool show) => _showPolling = show;
@@ -29,6 +38,70 @@ namespace EtherCAT_DLL_Mock
         }
         public static void Mock_SetPosition(ushort axis, int pos) { if (axis < 6) _position[axis] = pos; }
         public static void Mock_SetMotionDone(ushort axis) { if (axis < 6) { _mdone[axis] = 0; _speed[axis] = 0; } }
+
+        /// <summary>
+        /// 依 PVTComplete 點位表逐步更新虛擬位置（供 web 監控顯示動態效果）。
+        /// time[] 為累計時間戳（ms），pos[] 為各時間點的目標脈波位置。
+        /// </summary>
+        private const int INTERP_INTERVAL_MS = 100;
+
+        private static void AnimatePvt(int axis, int[] pos, int[] time, int endVel)
+        {
+            // 動畫啟動前擷取目前位置作為插值起點
+            int startPos;
+            lock (_lock) { startPos = _position[axis]; }
+
+            Task.Run(async () =>
+            {
+                var startTime = DateTime.UtcNow;
+                int totalMs = time[time.Length - 1];
+
+                // 每 100ms 插幀一次，直到動畫結束
+                for (int t = INTERP_INTERVAL_MS; t <= totalMs; t += INTERP_INTERVAL_MS)
+                {
+                    int waitMs = t - (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
+                    if (waitMs > 0) await Task.Delay(waitMs);
+
+                    int elapsed = (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
+                    elapsed = Math.Clamp(elapsed, 0, totalMs);
+
+                    // 插值點位表：[startPos@0] → [pos[0]@time[0]] → [pos[1]@time[1]] → ...
+                    int interpPos;
+                    if (elapsed <= time[0])
+                    {
+                        interpPos = time[0] == 0 ? pos[0]
+                            : startPos + (int)((long)(pos[0] - startPos) * elapsed / time[0]);
+                    }
+                    else if (elapsed >= totalMs)
+                    {
+                        interpPos = pos[pos.Length - 1];
+                    }
+                    else
+                    {
+                        int lo = 0, hi = time.Length - 1;
+                        while (hi - lo > 1)
+                        {
+                            int mid = (lo + hi) / 2;
+                            if (time[mid] <= elapsed) lo = mid; else hi = mid;
+                        }
+                        int t0 = time[lo], t1 = time[hi];
+                        int p0 = pos[lo],  p1 = pos[hi];
+                        interpPos = t1 == t0 ? p1
+                            : p0 + (int)((long)(p1 - p0) * (elapsed - t0) / (t1 - t0));
+                    }
+
+                    lock (_lock) { _position[axis] = interpPos; }
+                }
+
+                // 確保最終位置精確
+                lock (_lock)
+                {
+                    _position[axis] = pos[pos.Length - 1];
+                    if (endVel == 0) { _mdone[axis] = 0; _speed[axis] = 0; }
+                    if (_bufferLength[axis] > 0) _bufferLength[axis]--;
+                }
+            });
+        }
 
         private static void MockLog(string msg)
         {
@@ -184,27 +257,50 @@ namespace EtherCAT_DLL_Mock
         public static ushort CS_ECAT_Slave_CSP_Start_PVTComplete_Move(ushort CardNo, ushort NodeID, ushort SlotID,
             int DataCnt, ref int TargetPos, ref int TargetTime, int StrVel, int EndVel, ushort Abs)
         {
-            if (NodeID < 6) { _mdone[NodeID] = 2; _bufferLength[NodeID]++; }
-            MockLog($"CSP_PVTComplete_Move(軸{NodeID}, {DataCnt}筆, StrV={StrVel}, EndV={EndVel})");
-            if (NodeID < 6)
+            if (NodeID >= 6) return 0;
+            _mdone[NodeID] = 2;
+            _bufferLength[NodeID]++;
+
+            var pos  = new int[DataCnt];
+            var time = new int[DataCnt];
+            var sb = new StringBuilder();
+            sb.AppendLine($"CSP_PVTComplete_Move(軸{NodeID}, {DataCnt}筆, StrV={StrVel}, EndV={EndVel}, Abs={Abs})");
+            for (int k = 0; k < DataCnt; k++)
             {
-                var nid = NodeID;
-                Task.Run(async () =>
-                {
-                    await Task.Delay(300);
-                    lock (_lock)
-                    {
-                        if (EndVel == 0) { _mdone[nid] = 0; _speed[nid] = 0; }
-                        if (_bufferLength[nid] > 0) _bufferLength[nid]--;
-                    }
-                });
+                pos[k]  = Unsafe.Add(ref TargetPos,  k);
+                time[k] = Unsafe.Add(ref TargetTime, k);
+                sb.AppendLine($"  [{k:D2}] Pos={pos[k],10} pulse  Time={time[k],8} ms");
             }
+            MockLog(sb.ToString().TrimEnd());
+
+            AnimatePvt(NodeID, pos, time, EndVel);
             return 0;
         }
 
         public static ushort CS_ECAT_Slave_CSP_Start_PVTComplete_Config(ushort CardNo, ushort NodeID, ushort SlotID,
             int DataCnt, ref int TargetPos, ref int TargetTime, int StrVel, int EndVel, ushort Abs)
-        { MockLog($"CSP_PVTComplete_Config(軸{NodeID}, {DataCnt}筆)"); return 0; }
+        {
+            if (NodeID >= 6) return 0;
+
+            var pos  = new int[DataCnt];
+            var time = new int[DataCnt];
+            var sb = new StringBuilder();
+            sb.AppendLine($"CSP_PVTComplete_Config(軸{NodeID}, {DataCnt}筆, StrV={StrVel}, EndV={EndVel}, Abs={Abs})");
+            for (int k = 0; k < DataCnt; k++)
+            {
+                pos[k]  = Unsafe.Add(ref TargetPos,  k);
+                time[k] = Unsafe.Add(ref TargetTime, k);
+                sb.AppendLine($"  [{k:D2}] Pos={pos[k],10} pulse  Time={time[k],8} ms");
+            }
+            MockLog(sb.ToString().TrimEnd());
+
+            // 暫存點位，等待 Sync_Move 統一啟動動畫
+            _pvtPos[NodeID]    = pos;
+            _pvtTime[NodeID]   = time;
+            _pvtCnt[NodeID]    = DataCnt;
+            _pvtEndVel[NodeID] = EndVel;
+            return 0;
+        }
 
         public static ushort CS_ECAT_Slave_CSP_Start_PVT_Move(ushort CardNo, ushort NodeID, ushort SlotID,
             int DataCnt, ref int TargetPos, ref int TargetTime, ref int TargetVel, ushort Abs)
@@ -218,12 +314,16 @@ namespace EtherCAT_DLL_Mock
             ref ushort AxisArray, ref ushort SlotArray)
         {
             MockLog($"CSP_PVT_Sync_Move({AxisNum}軸同步)");
-            for (int i = 0; i < Math.Min((int)AxisNum, 6); i++) _mdone[i] = 2;
-            Task.Run(async () =>
+            int n = Math.Min((int)AxisNum, 6);
+            for (int i = 0; i < n; i++)
             {
-                await Task.Delay(300);
-                lock (_lock) { for (int i = 0; i < 6; i++) { _mdone[i] = 0; _speed[i] = 0; } }
-            });
+                int axis = Unsafe.Add(ref AxisArray, i);
+                if (axis >= 6 || _pvtPos[axis] == null) continue;
+                _mdone[axis] = 2;
+                _bufferLength[axis]++;
+                AnimatePvt(axis, _pvtPos[axis], _pvtTime[axis], _pvtEndVel[axis]);
+                _pvtPos[axis] = null!;  // 消耗後清除
+            }
             return 0;
         }
 

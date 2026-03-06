@@ -79,7 +79,7 @@ internal static class Program
         RunStep("6) 多軸同動（末端相對移動）", () =>
         {
             bool ok = robot.MoveRelativeEndEffector(
-                dx: 0, dy: 0, dz: -40,
+                dx: 0, dy: 0, dz: -400,
                 dYaw: 0, dPitch: 0, dRoll: 0,
                 maxSpeed: 20000);
             if (!ok) throw new InvalidOperationException("多軸同動命令送出失敗");
