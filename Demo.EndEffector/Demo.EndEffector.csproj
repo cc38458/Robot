@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Demo.EndEffector</AssemblyName>
+    <RootNamespace>Demo.EndEffector</RootNamespace>
+    <Description>RA605 末端位置連續控制（Web 觸控手柄）</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Robot.Motion.RA605\Robot.Motion.RA605.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="controller.html">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+</Project>
