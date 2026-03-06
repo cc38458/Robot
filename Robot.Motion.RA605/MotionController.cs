@@ -14,6 +14,7 @@ namespace Robot.Motion.RA605
         private const int AXIS_COUNT = 6;
         private const int CONTINUOUS_CYCLE_MS = 50;  // 持續移動控制迴圈週期
         private const int PVT_POINTS_PER_BATCH = 10; // 每批 PVT 點數
+        private const int MAX_JOINT_JUMP_MDEG = 30_000; // 單步最大關節跳動（30°）
 
         private readonly RA605Kinematics _kin;
         private readonly RobotLogger _log;
@@ -270,11 +271,29 @@ namespace Robot.Motion.RA605
                         var ptMdeg = _kin.InverseMdeg(newPosture, prevMdeg);
                         if (ptMdeg == null)
                         {
-                            _log.Warn($"持續移動：第 {p} 點 IK 無解，截斷");
+                            _log.Warn($"持續移動：第 {p} 點 IK 無解（超出工作空間或關節限位），截斷");
                             allValid = false;
-                            // 截斷到上一個有效點
                             for (int a = 0; a < AXIS_COUNT; a++)
-                                dataCount[a] = Math.Max(1, p);
+                                dataCount[a] = p; // p=0 時不送任何指令
+                            break;
+                        }
+
+                        // 關節單步跳動保護
+                        bool jumpExceeded = false;
+                        for (int a = 0; a < AXIS_COUNT; a++)
+                        {
+                            if (Math.Abs(ptMdeg[a] - prevMdeg[a]) > MAX_JOINT_JUMP_MDEG)
+                            {
+                                _log.Warn($"持續移動：第 {p} 點軸{a} 跳動過大（{Math.Abs(ptMdeg[a] - prevMdeg[a]) / 1000f:F1}°），截斷");
+                                jumpExceeded = true;
+                                break;
+                            }
+                        }
+                        if (jumpExceeded)
+                        {
+                            allValid = false;
+                            for (int a = 0; a < AXIS_COUNT; a++)
+                                dataCount[a] = p;
                             break;
                         }
 

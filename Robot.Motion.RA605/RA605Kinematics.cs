@@ -10,6 +10,10 @@ namespace Robot.Motion.RA605
     /// </summary>
     public class RA605Kinematics
     {
+        // ── 關節角度物理限位（度）── RA605 規格
+        private static readonly float[] JOINT_MIN = { -165f, -125f,  -55f, -190f, -115f, -360f };
+        private static readonly float[] JOINT_MAX = {  165f,   85f,  185f,  190f,  115f,  360f };
+
         // ── DH 參數（RA605 機械臂） ──
         private const float D1 = 375f;
         private const float A1 = 30f;
@@ -176,13 +180,22 @@ namespace Robot.Motion.RA605
             float dev2 = MathF.Abs(a4s2 - ref4) + MathF.Abs(a5s2 - ref5) + MathF.Abs(a6s2 - ref6);
             bool useSol1 = dev1 <= dev2;
 
-            return new float[]
+            float[] result = new float[]
             {
                 a1, a2, a3,
                 useSol1 ? a4s1 : a4s2,
                 useSol1 ? a5s1 : a5s2,
                 useSol1 ? a6s1 : a6s2,
             };
+
+            // 7. 關節限位檢查
+            for (int i = 0; i < 6; i++)
+            {
+                if (result[i] < JOINT_MIN[i] || result[i] > JOINT_MAX[i])
+                    return null;
+            }
+
+            return result;
         }
 
         /// <summary>逆向運動學（mdeg 版本）。refMdeg 為當前各軸角度（mdeg），用於選最小轉動解。</summary>
