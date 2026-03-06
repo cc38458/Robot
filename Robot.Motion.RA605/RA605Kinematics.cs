@@ -84,9 +84,10 @@ namespace Robot.Motion.RA605
 
         /// <summary>
         /// 逆向運動學：4×4 齊次矩陣 → 6 軸角度（度）
+        /// refAngles：當前關節角（度），用於在兩組 ZYZ 等價解中選擇轉動量最小者。
         /// 無解回傳 null
         /// </summary>
-        public float[]? Inverse(Matrix4x4 eePosture)
+        public float[]? Inverse(Matrix4x4 eePosture, float[]? refAngles = null)
         {
             // 1. 減去工具長度，求手腕中心 OC
             var ocPosture = Matrix4x4.CreateTranslation(0, 0, -(D6 + ToolLength)) * eePosture;
@@ -140,17 +141,55 @@ namespace Robot.Motion.RA605
             var euler = EulerZYZ(Matrix4x4.Transpose(rMatrix));
 
             // 6. 弧度轉角度
+            float a1 = axis1 * RAD2DEG;
+            float a2 = axis2 * RAD2DEG;
+            float a3 = axis3 * RAD2DEG;
+
+            // ZYZ 兩組等價解：(α,β,γ) 與 (α+π,−β,γ+π)
+            float a4s1 = -euler.X * RAD2DEG;
+            float a5s1 = -euler.Y * RAD2DEG;
+            float a6s1 = -euler.Z * RAD2DEG;
+            float a4s2 = -(euler.X + MathF.PI) * RAD2DEG;
+            float a5s2 =  euler.Y * RAD2DEG;   // −(−β)
+            float a6s2 = -(euler.Z + MathF.PI) * RAD2DEG;
+
+            // 以參考角為基準，將每個角度正規化到「距參考最近的等價角」
+            float ref1 = refAngles != null && refAngles.Length >= 6 ? refAngles[0] : 0f;
+            float ref2 = refAngles != null && refAngles.Length >= 6 ? refAngles[1] : 0f;
+            float ref3 = refAngles != null && refAngles.Length >= 6 ? refAngles[2] : 0f;
+            float ref4 = refAngles != null && refAngles.Length >= 6 ? refAngles[3] : 0f;
+            float ref5 = refAngles != null && refAngles.Length >= 6 ? refAngles[4] : 0f;
+            float ref6 = refAngles != null && refAngles.Length >= 6 ? refAngles[5] : 0f;
+
+            a1   = NearestAngle(a1,   ref1);
+            a2   = NearestAngle(a2,   ref2);
+            a3   = NearestAngle(a3,   ref3);
+            a4s1 = NearestAngle(a4s1, ref4);
+            a5s1 = NearestAngle(a5s1, ref5);
+            a6s1 = NearestAngle(a6s1, ref6);
+            a4s2 = NearestAngle(a4s2, ref4);
+            a5s2 = NearestAngle(a5s2, ref5);
+            a6s2 = NearestAngle(a6s2, ref6);
+
+            // 選偏差總和最小的解
+            float dev1 = MathF.Abs(a4s1 - ref4) + MathF.Abs(a5s1 - ref5) + MathF.Abs(a6s1 - ref6);
+            float dev2 = MathF.Abs(a4s2 - ref4) + MathF.Abs(a5s2 - ref5) + MathF.Abs(a6s2 - ref6);
+            bool useSol1 = dev1 <= dev2;
+
             return new float[]
             {
-                axis1 * RAD2DEG, axis2 * RAD2DEG, axis3 * RAD2DEG,
-                -euler.X * RAD2DEG, -euler.Y * RAD2DEG, -euler.Z * RAD2DEG,
+                a1, a2, a3,
+                useSol1 ? a4s1 : a4s2,
+                useSol1 ? a5s1 : a5s2,
+                useSol1 ? a6s1 : a6s2,
             };
         }
 
-        /// <summary>逆向運動學（mdeg 版本）</summary>
-        public int[]? InverseMdeg(Matrix4x4 eePosture)
+        /// <summary>逆向運動學（mdeg 版本）。refMdeg 為當前各軸角度（mdeg），用於選最小轉動解。</summary>
+        public int[]? InverseMdeg(Matrix4x4 eePosture, int[]? refMdeg = null)
         {
-            var deg = Inverse(eePosture);
+            float[]? refAngles = refMdeg?.Select(m => m / 1000f).ToArray();
+            var deg = Inverse(eePosture, refAngles);
             if (deg == null) return null;
             int[] mdeg = new int[6];
             for (int i = 0; i < 6; i++)
@@ -204,6 +243,16 @@ namespace Robot.Motion.RA605
                 gamma = MathF.Atan2(m.M32, -m.M31);
             }
             return new Vector3(alpha, beta, gamma);
+        }
+
+        /// <summary>
+        /// 將 angle 正規化到距 reference 最近的等價角（差值限制在 ±180°）
+        /// </summary>
+        private static float NearestAngle(float angle, float reference)
+        {
+            float diff = angle - reference;
+            diff -= MathF.Round(diff / 360f) * 360f;
+            return reference + diff;
         }
 
         /// <summary>清理矩陣浮點誤差</summary>

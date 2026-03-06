@@ -69,16 +69,16 @@ namespace Robot.Motion.RA605
                 return false;
             }
 
-            // 1. IK 計算目標角度
-            var targetMdeg = _kin.InverseMdeg(targetPosture);
+            // 1. 取目前角度（作為 IK 參考，選最小轉動解）
+            var currentMdeg = AxisCard.Pos;
+
+            // 2. IK 計算目標角度
+            var targetMdeg = _kin.InverseMdeg(targetPosture, currentMdeg);
             if (targetMdeg == null)
             {
                 _log.Error("MoveToPosture 拒絕：IK 無解（目標超出工作空間）");
                 return false;
             }
-
-            // 2. 取目前角度
-            var currentMdeg = AxisCard.Pos;
 
             // 3. 建構 PVT 資料（簡單兩點：起點→終點）
             int[] dataCount = new int[AXIS_COUNT];
@@ -267,7 +267,7 @@ namespace Robot.Motion.RA605
                         newPosture.M31 = newRot.M31; newPosture.M32 = newRot.M32; newPosture.M33 = newRot.M33;
                         newPosture.M41 = newX; newPosture.M42 = newY; newPosture.M43 = newZ;
 
-                        var ptMdeg = _kin.InverseMdeg(newPosture);
+                        var ptMdeg = _kin.InverseMdeg(newPosture, prevMdeg);
                         if (ptMdeg == null)
                         {
                             _log.Warn($"持續移動：第 {p} 點 IK 無解，截斷");
@@ -365,8 +365,8 @@ namespace Robot.Motion.RA605
             targetPosture.M31 = newRot.M31; targetPosture.M32 = newRot.M32; targetPosture.M33 = newRot.M33;
             targetPosture.M41 = newX; targetPosture.M42 = newY; targetPosture.M43 = newZ;
 
-            // 3. IK
-            var targetMdeg = _kin.InverseMdeg(targetPosture);
+            // 3. IK（以 currentPos 為參考，選最小轉動解）
+            var targetMdeg = _kin.InverseMdeg(targetPosture, currentPos);
             if (targetMdeg == null)
             {
                 _log.Error("MoveRelativeEndEffector 拒絕：IK 無解");
