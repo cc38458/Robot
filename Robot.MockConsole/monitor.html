@@ -309,12 +309,14 @@ loadAllMeshes();
 // ═══════════════════════════════════════
 function updateArm(angDeg) {
   // 方向校正：J3 維持原方向，其餘軸反向
-  const axisDirFix = [-1, -1, 1, -1, -1, -1];
+  const axisDirFix = [1, 1, -1, 1, 1, 1];
+  // J5（index 4）3D模型預設垂直向下，運動學模型預設水平向前，預補 +90°
+  const preOffset = [0, 0, 0, 0, Math.PI / 2, 0];
   for (let i = 0; i < 6; i++) {
     const rad = angDeg[i] * Math.PI / 180;
     const ax = JOINTS[i].axis;
     const sign = ax[0] !== 0 ? ax[0] : (ax[1] !== 0 ? ax[1] : ax[2]);
-    jointGroups[i].rotation.set(0, 0, rad * sign * axisDirFix[i]);
+    jointGroups[i].rotation.set(0, 0, rad * sign * axisDirFix[i] + preOffset[i]);
   }
 }
 
@@ -351,6 +353,34 @@ function updateCam(){
 }
 
 // ═══════════════════════════════════════
+// RA605 DH-based Forward Kinematics (mirrors RA605Kinematics.cs)
+// Uses System.Numerics row-vector convention (translation in last row).
+// Returns a row-major Float64Array[16] in mm.
+// ═══════════════════════════════════════
+const FK_D1=375,FK_A1=30,FK_A2=340,FK_A3X=40,FK_A3Z=338,FK_D6=86.5,FK_TOOL=60;
+
+function _mmul(A,B){
+  const R=new Float64Array(16);
+  for(let i=0;i<4;i++)for(let j=0;j<4;j++)for(let k=0;k<4;k++) R[i*4+j]+=A[i*4+k]*B[k*4+j];
+  return R;
+}
+function _rx(a){const c=Math.cos(a),s=Math.sin(a);return new Float64Array([1,0,0,0, 0,c,s,0, 0,-s,c,0, 0,0,0,1]);}
+function _rz(a){const c=Math.cos(a),s=Math.sin(a);return new Float64Array([c,s,0,0, -s,c,0,0, 0,0,1,0, 0,0,0,1]);}
+function _tr(x,y,z){return new Float64Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]);}
+
+function fkRA605(angDeg){
+  const R90=Math.PI/2;
+  const a=angDeg.map(d=>d*Math.PI/180);
+  const m1=_mmul(_mmul(_rx(R90),_tr(FK_A1,0,FK_D1)),_rz(-a[0]));
+  const m2=_mmul(_tr(FK_A2,0,0),_rz(-(a[1]-R90)));
+  const m3=_mmul(_mmul(_tr(FK_A3X,0,FK_A3Z),_rx(R90)),_rz(-a[2]));
+  const m4=_mmul(_rx(-R90),_rz(-a[3]));
+  const m5=_mmul(_rx(R90),_rz(-a[4]));
+  const m6=_mmul(_tr(0,0,FK_D6+FK_TOOL),_rz(-a[5]));
+  return _mmul(m6,_mmul(m5,_mmul(m4,_mmul(m3,_mmul(m2,m1)))));
+}
+
+// ═══════════════════════════════════════
 // UI
 // ═══════════════════════════════════════
 function initUI(){
@@ -374,13 +404,13 @@ function updateUI(){
     document.getElementById(`jp${i}`).textContent=`ω ${S.spd[i]} ｜ Q ${S.ql[i]}`;
     document.getElementById(`jb${i}`).style.width=((S.ang[i]+180)/360*100).toFixed(1)+'%';
   }
-  const p=getEEWorldPos();
-  // Convert back to robot-style coordinates after root frame correction:
-  // Xr = Xw, Yr = -Zw, Zr = Yw
-  document.getElementById('eeI').innerHTML=`<div class="er"><span class="el">X</span><span class="ev">${(p.x*1000).toFixed(1)} mm</span></div><div class="er"><span class="el">Y</span><span class="ev">${(-p.z*1000).toFixed(1)} mm</span></div><div class="er"><span class="el">Z</span><span class="ev">${(p.y*1000).toFixed(1)} mm</span></div>`;
-  eeGroup.updateWorldMatrix(true,false);
-  const wm=eeGroup.matrixWorld.elements;
-  for(let c=0;c<4;c++)for(let r=0;r<4;r++) document.getElementById(`m${r*4+c}`).textContent=wm[c*4+r].toFixed(3);
+  // FK from DH parameters (matches RA605Kinematics.cs) — values in mm
+  const fk=fkRA605(S.ang);
+  // Translation: fk[12]=X, fk[13]=Y, fk[14]=Z (row 3 in row-vector convention = M41,M42,M43)
+  document.getElementById('eeI').innerHTML=`<div class="er"><span class="el">X</span><span class="ev">${fk[12].toFixed(1)} mm</span></div><div class="er"><span class="el">Y</span><span class="ev">${fk[13].toFixed(1)} mm</span></div><div class="er"><span class="el">Z</span><span class="ev">${fk[14].toFixed(1)} mm</span></div>`;
+  // Display matrix in standard column-vector convention (translation in last column)
+  // Transpose from row-vector convention: element (r,c) in display = fk[c*4+r]
+  for(let r=0;r<4;r++)for(let c=0;c<4;c++) document.getElementById(`m${r*4+c}`).textContent=fk[c*4+r].toFixed(3);
   document.getElementById('clk').textContent=new Date().toLocaleTimeString('zh-TW',{hour12:false});
 }
 
