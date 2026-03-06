@@ -225,24 +225,23 @@ namespace EtherCAT_DLL_Mock
         public static ushort CS_ECAT_Slave_CSP_Start_Move(ushort CardNo, ushort NodeID, ushort SlotNo,
             int Dist, int StrVel, int ConstVel, int EndVel, double Tacc, double Tdec, ushort SCurve, ushort IsAbs)
         {
-            if (NodeID < 6) { _mdone[NodeID] = 2; _speed[NodeID] = ConstVel; _bufferLength[NodeID]++; }
+            if (NodeID >= 6) return 0;
+            _mdone[NodeID] = 2; _speed[NodeID] = ConstVel; _bufferLength[NodeID]++;
             string mode = IsAbs == 1 ? "絕對" : "相對";
             MockLog($"CSP_Move(軸{NodeID}, {mode}, D={Dist}, V={ConstVel}, EndV={EndVel})");
-            // 模擬延遲後完成
-            if (NodeID < 6)
+
+            int startPos, targetPos;
+            lock (_lock)
             {
-                var nid = NodeID;
-                Task.Run(async () =>
-                {
-                    await Task.Delay(200);
-                    lock (_lock)
-                    {
-                        if (EndVel == 0) { _mdone[nid] = 0; _speed[nid] = 0; }
-                        _position[nid] = IsAbs == 1 ? Dist : _position[nid] + Dist;
-                        if (_bufferLength[nid] > 0) _bufferLength[nid]--;
-                    }
-                });
+                startPos = _position[NodeID];
+                targetPos = IsAbs == 1 ? Dist : startPos + Dist;
             }
+            long delta = Math.Abs((long)targetPos - startPos);
+            int totalMs = ConstVel > 0 && delta > 0
+                ? (int)(delta * 1000L / ConstVel) + (int)((Tacc + Tdec) * 500)
+                : 200;
+            totalMs = Math.Max(totalMs, 200);
+            AnimatePvt(NodeID, new[] { targetPos }, new[] { totalMs }, EndVel);
             return 0;
         }
 
