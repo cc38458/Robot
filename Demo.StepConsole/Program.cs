@@ -8,11 +8,11 @@ internal static class Program
     static void Main()
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
-        Console.WriteLine("RA605 逐步控制範例（Mock + 唯讀 Web 監控）");
+        Console.WriteLine("RA605 逐步控制範例");
         Console.WriteLine("每個步驟執行完成後，按 Enter 進入下一步。\n");
 
         using var robot = new RA605RobotApp(
-            backendMode: RobotBackendMode.Real,
+            backendMode: RobotBackendMode.Mock,
             zeroConfigPath: "axis_zero_config.json",
             toolLength: 60f,
             logDirectory: "logs",
@@ -24,7 +24,7 @@ internal static class Program
                 throw new InvalidOperationException($"Connect 失敗，狀態={robot.AxisCardState}");
             Console.WriteLine($"已連線，狀態：{robot.AxisCardState}");
         });
-
+        
         RunStep("2) 初始化（Initialize）＋開啟 Web 監控頁", () =>
         {
             if (!robot.Initialize())
@@ -40,7 +40,7 @@ internal static class Program
             Console.WriteLine($"監控頁：{url}");
             Console.WriteLine("請用瀏覽器開啟網址查看手臂狀態（唯讀）。");
         });
-
+        /*
         RunStep("3) 原點標定", () =>
         {
             if (robot.BackendMode != RobotBackendMode.Mock)
@@ -54,10 +54,15 @@ internal static class Program
                 ? "Mock 模式：略過原點標定。"
                 : "原點標定完成，已更新 axis_zero_config.json。");
         });
-
+        */
         RunStep("4) 第一軸移動到 30 度", () =>
         {
-            bool ok = robot.MoveAxisAbsolute(axis: 0, angleMdeg: 30000, constVel: 30000);
+            bool ok = robot.MoveAxisAbsolute(axis: 0, angleMdeg: 10000, constVel: 30000);
+            ok = robot.MoveAxisAbsolute(axis: 1, angleMdeg: 10000, constVel: 30000);
+            ok = robot.MoveAxisAbsolute(axis: 2, angleMdeg: 10000, constVel: 30000);
+            ok = robot.MoveAxisAbsolute(axis: 3, angleMdeg: 10000, constVel: 30000);
+            ok = robot.MoveAxisAbsolute(axis: 4, angleMdeg: 10000, constVel: 30000);
+            ok = robot.MoveAxisAbsolute(axis: 5, angleMdeg: 10000, constVel: 30000);
             if (!ok) throw new InvalidOperationException("J1 移動命令送出失敗");
             Console.WriteLine("J1 移動命令已送出（30°）。");
             WaitUntilAllAxisStop(robot, 20);
@@ -74,7 +79,7 @@ internal static class Program
         RunStep("6) 多軸同動（末端相對移動）", () =>
         {
             bool ok = robot.MoveRelativeEndEffector(
-                dx: 30, dy: 20, dz: -20,
+                dx: 0, dy: 0, dz: -40,
                 dYaw: 0, dPitch: 0, dRoll: 0,
                 maxSpeed: 20000);
             if (!ok) throw new InvalidOperationException("多軸同動命令送出失敗");
