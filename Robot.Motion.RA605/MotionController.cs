@@ -74,12 +74,14 @@ namespace Robot.Motion.RA605
             var currentMdeg = AxisCard.Pos;
 
             // 2. IK 計算目標角度
-            var targetMdeg = _kin.InverseMdeg(targetPosture, currentMdeg);
+            var targetMdeg = _kin.InverseMdeg(targetPosture, currentMdeg, out var ikDiagnostic);
             if (targetMdeg == null)
             {
-                _log.Error("MoveToPosture 拒絕：IK 無解（目標超出工作空間）");
+                _log.Error($"MoveToPosture 拒絕：IK 無解（目標超出工作空間） | {ikDiagnostic ?? "無額外診斷"}");
                 return false;
             }
+            if (!string.IsNullOrEmpty(ikDiagnostic))
+                _log.Warn($"MoveToPosture：{ikDiagnostic}");
 
             // 3. 建構 PVT 資料（簡單兩點：起點→終點）
             int[] dataCount = new int[AXIS_COUNT];
@@ -268,15 +270,17 @@ namespace Robot.Motion.RA605
                         newPosture.M31 = newRot.M31; newPosture.M32 = newRot.M32; newPosture.M33 = newRot.M33;
                         newPosture.M41 = newX; newPosture.M42 = newY; newPosture.M43 = newZ;
 
-                        var ptMdeg = _kin.InverseMdeg(newPosture, prevMdeg);
+                        var ptMdeg = _kin.InverseMdeg(newPosture, prevMdeg, out var ikDiagnostic);
                         if (ptMdeg == null)
                         {
-                            _log.Warn($"持續移動：第 {p} 點 IK 無解（超出工作空間或關節限位），截斷");
+                            _log.Warn($"持續移動：第 {p} 點 IK 無解（超出工作空間或關節限位），截斷 | {ikDiagnostic ?? "無額外診斷"}");
                             allValid = false;
                             for (int a = 0; a < AXIS_COUNT; a++)
                                 dataCount[a] = p; // p=0 時不送任何指令
                             break;
                         }
+                        if (!string.IsNullOrEmpty(ikDiagnostic))
+                            _log.Warn($"持續移動：第 {p} 點 {ikDiagnostic}");
 
                         // 關節單步跳動保護
                         bool jumpExceeded = false;
@@ -385,12 +389,14 @@ namespace Robot.Motion.RA605
             targetPosture.M41 = newX; targetPosture.M42 = newY; targetPosture.M43 = newZ;
 
             // 3. IK（以 currentPos 為參考，選最小轉動解）
-            var targetMdeg = _kin.InverseMdeg(targetPosture, currentPos);
+            var targetMdeg = _kin.InverseMdeg(targetPosture, currentPos, out var ikDiagnostic);
             if (targetMdeg == null)
             {
-                _log.Error("MoveRelativeEndEffector 拒絕：IK 無解");
+                _log.Error($"MoveRelativeEndEffector 拒絕：IK 無解 | {ikDiagnostic ?? "無額外診斷"}");
                 return false;
             }
+            if (!string.IsNullOrEmpty(ikDiagnostic))
+                _log.Warn($"MoveRelativeEndEffector：{ikDiagnostic}");
 
             // 4. 計算移動時間（由 maxSpeed 和最大軸位移決定）
             int maxDelta = 0;
