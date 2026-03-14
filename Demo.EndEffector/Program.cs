@@ -12,7 +12,7 @@ internal static class Program
         using var robot = new RA605RobotApp(
             backendMode: RobotBackendMode.Mock,
             zeroConfigPath: "axis_zero_config.json",
-            toolLength: 60f,
+            toolLength: 0f,
             logDirectory: "logs",
             logPrefix: "EndEffector");
 

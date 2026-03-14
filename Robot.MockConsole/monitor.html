@@ -56,7 +56,7 @@ header .clk{font:12px var(--mono);color:var(--dim)}
   <div class="stit">各軸狀態（唯讀）</div><div id="jcards"></div>
 </div>
 <div class="vp" id="vp">
-  <div class="vpl">拖曳旋轉 ｜ 滾輪縮放</div>
+  <div class="vpl">左鍵旋轉 ｜ 右鍵平移 ｜ 滾輪縮放</div>
   <div class="vp-load" id="loadTxt">載入 STL 模型中...</div>
 </div>
 <div class="right">
@@ -328,19 +328,41 @@ function getEEWorldPos() {
 }
 
 // ═══════════════════════════════════════
-// Camera orbit
+// Camera orbit + pan
+// 左鍵拖曳：旋轉；右鍵/中鍵拖曳：平移焦點；滾輪：縮放
 // ═══════════════════════════════════════
-let drag=false, pm={x:0,y:0};
+let dragMode=0, pm={x:0,y:0}; // 0=無, 1=旋轉, 2=平移
 let cTh=Math.PI/4, cPh=Math.PI/5, cD=2.0;
 const cTgt = new THREE.Vector3(0, 0.4, 0);
 
-vp.addEventListener('mousedown', e=>{drag=true;pm={x:e.clientX,y:e.clientY}});
-window.addEventListener('mouseup', ()=>drag=false);
-vp.addEventListener('mousemove', e=>{
-  if(!drag)return;
-  cTh+=(e.clientX-pm.x)*0.005;
-  cPh=Math.max(0.05,Math.min(1.5,cPh-(e.clientY-pm.y)*0.005));
+vp.addEventListener('mousedown', e=>{
   pm={x:e.clientX,y:e.clientY};
+  dragMode = (e.button===0) ? 1 : 2;
+  e.preventDefault();
+});
+window.addEventListener('mouseup', ()=>dragMode=0);
+vp.addEventListener('contextmenu', e=>e.preventDefault());
+
+vp.addEventListener('mousemove', e=>{
+  if(!dragMode) return;
+  const dx=e.clientX-pm.x, dy=e.clientY-pm.y;
+  pm={x:e.clientX,y:e.clientY};
+
+  if(dragMode===1){
+    // 旋轉
+    cTh += dx*0.005;
+    cPh = Math.max(0.05, Math.min(1.5, cPh - dy*0.005));
+  } else {
+    // 平移：沿相機的水平右向量與上向量移動焦點
+    // 右向量（世界空間，y=0 平面）：(sin(θ), 0, -cos(θ))
+    // 上向量（相機空間投影）：(-cos(φ)cos(θ), sin(φ), -cos(φ)sin(θ))
+    const panSpeed = cD * 0.0004;
+    const rx= Math.sin(cTh),          ry=0,            rz=-Math.cos(cTh);
+    const ux=-Math.cos(cPh)*Math.cos(cTh), uy=Math.sin(cPh), uz=-Math.cos(cPh)*Math.sin(cTh);
+    cTgt.x += (-dx*rx + dy*ux) * panSpeed;
+    cTgt.y += (-dx*ry + dy*uy) * panSpeed;
+    cTgt.z += (-dx*rz + dy*uz) * panSpeed;
+  }
 });
 vp.addEventListener('wheel',e=>{cD=Math.max(0.5,Math.min(6,cD+e.deltaY*0.002));e.preventDefault()},{passive:false});
 

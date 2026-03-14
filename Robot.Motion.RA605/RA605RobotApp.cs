@@ -43,7 +43,7 @@ namespace Robot.Motion.RA605
         public RA605RobotApp(
             RobotBackendMode backendMode,
             string zeroConfigPath = "axis_zero_config.json",
-            float toolLength = 60f,
+            float toolLength = 0f,
             string logDirectory = "logs",
             string logPrefix = "RA605App",
             LogLevel logLevel = LogLevel.INFO)

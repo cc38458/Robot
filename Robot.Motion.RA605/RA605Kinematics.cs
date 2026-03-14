@@ -32,7 +32,7 @@ namespace Robot.Motion.RA605
         /// <summary>工具頭長度（mm）</summary>
         public float ToolLength { get; set; }
 
-        public RA605Kinematics(float toolLength = 60f)
+        public RA605Kinematics(float toolLength = 0f)
         {
             ToolLength = toolLength;
         }
@@ -202,16 +202,24 @@ namespace Robot.Motion.RA605
             a5s2 = NearestAngle(a5s2, ref5);
             a6s2 = NearestAngle(a6s2, ref6);
 
-            // 優先保留 J4/J6 連續性，避免 wrist 在等價解間翻跳；
-            // J5 不作為主要判準，讓它可自然跨越 0°。
-            float wristDev1 = MathF.Abs(a4s1 - ref4) + MathF.Abs(a6s1 - ref6);
-            float wristDev2 = MathF.Abs(a4s2 - ref4) + MathF.Abs(a6s2 - ref6);
+            // 選解策略：以 J4 轉動幅度最小為首要，嚴格避免 J4 翻轉 180°。
+            // 兩組等價解的 J4 恆差 ~180°，所以 J4 偏差幾乎一定有明顯差距；
+            // J5 可自由轉動，不參與選解判準。
+            float j4dev1 = MathF.Abs(a4s1 - ref4);
+            float j4dev2 = MathF.Abs(a4s2 - ref4);
 
-            float dev1 = MathF.Abs(a4s1 - ref4) + MathF.Abs(a5s1 - ref5) + MathF.Abs(a6s1 - ref6);
-            float dev2 = MathF.Abs(a4s2 - ref4) + MathF.Abs(a5s2 - ref5) + MathF.Abs(a6s2 - ref6);
-            bool preferSol1 = MathF.Abs(wristDev1 - wristDev2) < 1e-4f
-                ? dev1 <= dev2
-                : wristDev1 <= wristDev2;
+            bool preferSol1;
+            if (MathF.Abs(j4dev1 - j4dev2) > 1f) // > 1° → J4 偏差有明顯差距
+            {
+                preferSol1 = j4dev1 <= j4dev2;
+            }
+            else
+            {
+                // 極罕見 J4 偏差相近（ref4 恰在兩解正中間）：以總偏差為次要判準
+                float dev1 = j4dev1 + MathF.Abs(a5s1 - ref5) + MathF.Abs(a6s1 - ref6);
+                float dev2 = j4dev2 + MathF.Abs(a5s2 - ref5) + MathF.Abs(a6s2 - ref6);
+                preferSol1 = dev1 <= dev2;
+            }
 
             float[][] candidates = preferSol1
                 ? new[]
