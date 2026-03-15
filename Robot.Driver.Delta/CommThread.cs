@@ -431,6 +431,11 @@ namespace Robot.Driver.Delta
                 _log.DllReturn("Set_MoveMode", ret, $"軸{i} → CSP");
                 if (ret != 0) return false;
 
+                // 設定齒輪比
+                ret = _ecat.CS_ECAT_Slave_CSP_Set_Gear(_cardNo, i, 0, _pulse2Ang[i], 1000, 1);
+                _log.DllReturn("Set_Gear", ret, $"軸{i}: {_pulse2Ang[i]}/1000");
+                if (ret != 0) return false;
+
                 // 啟用虛擬位置
                 ret = _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Enable(_cardNo, i, 0, 1);
                 _log.DllReturn("Virtual_Set_Enable", ret, $"軸{i}");
@@ -442,13 +447,9 @@ namespace Robot.Driver.Delta
                 _log.DllReturn("Get_Actual_Position", 0, $"軸{i}:真實位置={pos}");
 
                 // 設定當前位置
-                ret = _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Command(_cardNo, i, 0, pos-_zeroPulse[i]);
-                _log.DllReturn("Virtual_Set_Command", ret, $"軸{i}: 當前位置={pos-_zeroPulse[i]}");
-
-                // 設定齒輪比
-                ret = _ecat.CS_ECAT_Slave_CSP_Set_Gear(_cardNo, i, 0, _pulse2Ang[i], 1000, 1);
-                _log.DllReturn("Set_Gear", ret, $"軸{i}: {_pulse2Ang[i]}/1000");
-                if (ret != 0) return false;
+                ret = _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Command(_cardNo, i, 0,1000 * (pos - _zeroPulse[i]) / _pulse2Ang[i]);
+                _log.DllReturn("Virtual_Set_Command", ret, $"軸{i}: 當前位置={1000 * (pos - _zeroPulse[i]) / _pulse2Ang[i]}");
+                
 
                 lock (_stateLock) { _state[i] = MotorState.STOP; }
             }
@@ -556,14 +557,14 @@ namespace Robot.Driver.Delta
                 int pos = 0, speed = 0;
                 ushort mdone = 0, statusWord = 0;
 
-                ret = _ecat.CS_ECAT_Slave_Motion_Get_Position(_cardNo, i, 0, ref pos);
+                ret = _ecat.CS_ECAT_Slave_Motion_Get_Actual_Position(_cardNo, i, 0, ref pos);
                 ret = _ecat.CS_ECAT_Slave_Motion_Get_Current_Speed(_cardNo, i, 0, ref speed);
                 ret = _ecat.CS_ECAT_Slave_Motion_Get_Mdone(_cardNo, i, 0, ref mdone);
                 ret = _ecat.CS_ECAT_Slave_Motion_Get_StatusWord(_cardNo, i, 0, ref statusWord);
 
                 lock (_stateLock)
                 {
-                    _pos[i] = 1000 * pos / _pulse2Ang[i] ;
+                    _pos[i] = 1000 * (pos - _zeroPulse[i]) / _pulse2Ang[i];
                     _speed[i] = speed;
 
                     // 檢查警報（StatusWord Bit3）
@@ -583,7 +584,7 @@ namespace Robot.Driver.Delta
                     {
                         // CSP 模式：Mdone==0 表示靜止
                         _state[i] = MotorState.STOP;
-                        _log.Debug($"軸 {i} 運動完成");
+                        _log.Debug($"軸 {i} 運動完成,當前位置: {_pos[i]}");
 
                         // 檢查是否為最後一個指令且 endVel != 0 → 自動 Sd_Stop
                         CheckAutoSdStop(i);
