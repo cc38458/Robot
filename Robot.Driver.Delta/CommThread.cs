@@ -431,19 +431,24 @@ namespace Robot.Driver.Delta
                 _log.DllReturn("Set_MoveMode", ret, $"軸{i} → CSP");
                 if (ret != 0) return false;
 
-                // 設定齒輪比
-                ret = _ecat.CS_ECAT_Slave_CSP_Set_Gear(_cardNo, i, 0, _pulse2Ang[i], 1000, 1);
-                _log.DllReturn("Set_Gear", ret, $"軸{i}: {_pulse2Ang[i]}/1000");
-                if (ret != 0) return false;
-
                 // 啟用虛擬位置
                 ret = _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Enable(_cardNo, i, 0, 1);
                 _log.DllReturn("Virtual_Set_Enable", ret, $"軸{i}");
                 if (ret != 0) return false;
 
-                // 設定零點偏移
-                ret = _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Command(_cardNo, i, 0, -_zeroPulse[i]);
-                _log.DllReturn("Virtual_Set_Command", ret, $"軸{i}: 偏移={-_zeroPulse[i]}");
+                // 讀取當前實際位置（絕對編碼器脈波數）
+                int pos = 0;
+                _ecat.CS_ECAT_Slave_Motion_Get_Actual_Position(_cardNo, i, 0, ref pos);
+                _log.DllReturn("Get_Actual_Position", 0, $"軸{i}:真實位置={pos}");
+
+                // 設定當前位置
+                ret = _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Command(_cardNo, i, 0, pos-_zeroPulse[i]);
+                _log.DllReturn("Virtual_Set_Command", ret, $"軸{i}: 當前位置={pos-_zeroPulse[i]}");
+
+                // 設定齒輪比
+                ret = _ecat.CS_ECAT_Slave_CSP_Set_Gear(_cardNo, i, 0, _pulse2Ang[i], 1000, 1);
+                _log.DllReturn("Set_Gear", ret, $"軸{i}: {_pulse2Ang[i]}/1000");
+                if (ret != 0) return false;
 
                 lock (_stateLock) { _state[i] = MotorState.STOP; }
             }
@@ -477,16 +482,16 @@ namespace Robot.Driver.Delta
             // 建立預設設定檔
             _zeroPulse = new int[AXIS_COUNT];
             _pulse2Ang = DEFAULT_PULSE2ANG;
-            SaveZeroConfig();
+            SaveZeroConfig([0,0,0,0,0,0]);
         }
 
-        private void SaveZeroConfig()
+        private void SaveZeroConfig(int[] newPos)
         {
             try
             {
                 var config = new AxisZeroConfig
                 {
-                    ZeroPulse = _zeroPulse,
+                    ZeroPulse = newPos,
                     Pulse2Ang = _pulse2Ang,
                     LastModified = DateTime.Now,
                     Note = "各軸零點絕對脈波數與齒輪比設定",
@@ -516,14 +521,18 @@ namespace Robot.Driver.Delta
                 for (ushort i = 0; i < AXIS_COUNT; i++)
                 {
                     int pos = 0;
-                    _ecat.CS_ECAT_Slave_Motion_Get_Position(_cardNo, i, 0, ref pos);
-                    // Virtual_Set_Command 後 Get_Position 回傳虛擬座標
-                    // 換算回實際編碼器脈波絕對值
-                    newZeroPulse[i] = _zeroPulse[i] + pos;
+                    _ecat.CS_ECAT_Slave_Motion_Get_Actual_Position(_cardNo, i, 0, ref pos);
+                    newZeroPulse[i] =  pos;
                 }
-                Array.Copy(newZeroPulse, _zeroPulse, AXIS_COUNT);
-                SaveZeroConfig();
+                SaveZeroConfig(newZeroPulse);
                 _log.Info("原點標定完成，已儲存零點設定檔");
+
+                for (ushort i = 0; i < AXIS_COUNT; i++)
+                {
+                    // 設定當前位置
+                    _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Command(_cardNo, i, 0, 0);
+                    _log.DllReturn("Virtual_Set_Command", 0, $"軸{i}: 當前位置={0}");
+                }
                 return true;
             }
             catch (Exception ex)
@@ -554,7 +563,7 @@ namespace Robot.Driver.Delta
 
                 lock (_stateLock)
                 {
-                    _pos[i] = pos;
+                    _pos[i] = 1000 * pos / _pulse2Ang[i] ;
                     _speed[i] = speed;
 
                     // 檢查警報（StatusWord Bit3）

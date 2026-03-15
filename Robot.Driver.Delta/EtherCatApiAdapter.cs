@@ -19,6 +19,7 @@ namespace Robot.Driver.Delta
         ushort CS_ECAT_Slave_Motion_Set_Svon(ushort CardNo, ushort NodeID, ushort SlotNo, ushort On_Off);
 
         ushort CS_ECAT_Slave_Motion_Get_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position);
+        ushort CS_ECAT_Slave_Motion_Get_Actual_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position);
         ushort CS_ECAT_Slave_Motion_Get_Current_Speed(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Speed);
         ushort CS_ECAT_Slave_Motion_Get_Mdone(ushort CardNo, ushort NodeID, ushort SlotNo, ref ushort Mdone);
         ushort CS_ECAT_Slave_Motion_Get_StatusWord(ushort CardNo, ushort NodeID, ushort SlotNo, ref ushort StatusWord);
@@ -59,6 +60,7 @@ namespace Robot.Driver.Delta
         public ushort CS_ECAT_Slave_CSP_Virtual_Set_Command(ushort CardNo, ushort NodeID, ushort SlotID, int Command) => CEtherCAT_DLL.CS_ECAT_Slave_CSP_Virtual_Set_Command(CardNo, NodeID, SlotID, Command);
         public ushort CS_ECAT_Slave_Motion_Set_Svon(ushort CardNo, ushort NodeID, ushort SlotNo, ushort On_Off) => CEtherCAT_DLL.CS_ECAT_Slave_Motion_Set_Svon(CardNo, NodeID, SlotNo, On_Off);
 
+        public ushort CS_ECAT_Slave_Motion_Get_Actual_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position) => CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Actual_Position(CardNo, NodeID, SlotNo, ref Position);
         public ushort CS_ECAT_Slave_Motion_Get_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position) => CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Position(CardNo, NodeID, SlotNo, ref Position);
         public ushort CS_ECAT_Slave_Motion_Get_Current_Speed(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Speed) => CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Current_Speed(CardNo, NodeID, SlotNo, ref Speed);
         public ushort CS_ECAT_Slave_Motion_Get_Mdone(ushort CardNo, ushort NodeID, ushort SlotNo, ref ushort Mdone) => CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Mdone(CardNo, NodeID, SlotNo, ref Mdone);
@@ -99,8 +101,9 @@ namespace Robot.Driver.Delta
         public ushort CS_ECAT_Slave_CSP_Virtual_Set_Enable(ushort CardNo, ushort NodeID, ushort SlotID, ushort Enable) => CEtherCAT_Mock.CS_ECAT_Slave_CSP_Virtual_Set_Enable(CardNo, NodeID, SlotID, Enable);
         public ushort CS_ECAT_Slave_CSP_Virtual_Set_Command(ushort CardNo, ushort NodeID, ushort SlotID, int Command) => CEtherCAT_Mock.CS_ECAT_Slave_CSP_Virtual_Set_Command(CardNo, NodeID, SlotID, Command);
         public ushort CS_ECAT_Slave_Motion_Set_Svon(ushort CardNo, ushort NodeID, ushort SlotNo, ushort On_Off) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Set_Svon(CardNo, NodeID, SlotNo, On_Off);
-
+        
         public ushort CS_ECAT_Slave_Motion_Get_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Get_Position(CardNo, NodeID, SlotNo, ref Position);
+        public ushort CS_ECAT_Slave_Motion_Get_Actual_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Get_Position(CardNo, NodeID, SlotNo, ref Position);
         public ushort CS_ECAT_Slave_Motion_Get_Current_Speed(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Speed) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Get_Current_Speed(CardNo, NodeID, SlotNo, ref Speed);
         public ushort CS_ECAT_Slave_Motion_Get_Mdone(ushort CardNo, ushort NodeID, ushort SlotNo, ref ushort Mdone) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Get_Mdone(CardNo, NodeID, SlotNo, ref Mdone);
         public ushort CS_ECAT_Slave_Motion_Get_StatusWord(ushort CardNo, ushort NodeID, ushort SlotNo, ref ushort StatusWord) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Get_StatusWord(CardNo, NodeID, SlotNo, ref StatusWord);
