@@ -28,6 +28,9 @@ namespace EtherCAT_DLL_Mock
         private static readonly int[]   _pvtCnt     = new int[6];
         private static readonly int[]   _pvtEndVel  = new int[6];
 
+        // ── 動畫取消令牌（每軸獨立，停止時取消正在執行的動畫） ──
+        private static readonly CancellationTokenSource[] _animCts = new CancellationTokenSource[6];
+
         // ── 模擬控制方法（測試用） ──
         public static void Mock_SetVerbose(bool verbose) => _verbose = verbose;
         public static void Mock_SetShowPolling(bool show) => _showPolling = show;
@@ -45,22 +48,55 @@ namespace EtherCAT_DLL_Mock
         /// </summary>
         private const int INTERP_INTERVAL_MS = 100;
 
+        /// <summary>取消指定軸的動畫並建立新的取消令牌</summary>
+        private static CancellationToken CancelAndRenewAnimation(int axis)
+        {
+            var oldCts = _animCts[axis];
+            oldCts?.Cancel();
+            oldCts?.Dispose();
+            var newCts = new CancellationTokenSource();
+            _animCts[axis] = newCts;
+            return newCts.Token;
+        }
+
+        /// <summary>停止指定軸的動畫，將位置凍結在當前值</summary>
+        private static void StopAnimation(int axis)
+        {
+            var oldCts = _animCts[axis];
+            oldCts?.Cancel();
+            oldCts?.Dispose();
+            _animCts[axis] = null!;
+        }
+
         private static void AnimatePvt(int axis, int[] pos, int[] time, int endVel)
         {
-            // 動畫啟動前擷取目前位置作為插值起點
+            // 動畫啟動前擷取目前位置作為插值起點，並取消該軸舊動畫
             int startPos;
-            lock (_lock) { startPos = _position[axis]; }
+            CancellationToken ct;
+            lock (_lock)
+            {
+                startPos = _position[axis];
+                ct = CancelAndRenewAnimation(axis);
+            }
 
             Task.Run(async () =>
             {
                 var startTime = DateTime.UtcNow;
                 int totalMs = time[time.Length - 1];
 
-                // 每 100ms 插幀一次，直到動畫結束
+                // 每 100ms 插幀一次，直到動畫結束或被取消
                 for (int t = INTERP_INTERVAL_MS; t <= totalMs; t += INTERP_INTERVAL_MS)
                 {
+                    if (ct.IsCancellationRequested) return;
+
                     int waitMs = t - (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
-                    if (waitMs > 0) await Task.Delay(waitMs);
+                    if (waitMs > 0)
+                    {
+                        try { await Task.Delay(waitMs, ct); }
+                        catch (TaskCanceledException) { return; }
+                    }
+
+                    if (ct.IsCancellationRequested) return;
 
                     int elapsed = (int)(DateTime.UtcNow - startTime).TotalMilliseconds;
                     elapsed = Math.Clamp(elapsed, 0, totalMs);
@@ -92,6 +128,8 @@ namespace EtherCAT_DLL_Mock
 
                     lock (_lock) { _position[axis] = interpPos; }
                 }
+
+                if (ct.IsCancellationRequested) return;
 
                 // 確保最終位置精確
                 lock (_lock)
@@ -172,15 +210,44 @@ namespace EtherCAT_DLL_Mock
 
         public static ushort CS_ECAT_Slave_Motion_Emg_Stop(ushort CardNo, ushort NodeID, ushort SlotNo)
         {
-            if (NodeID < 6) { _mdone[NodeID] = 0; _speed[NodeID] = 0; }
-            MockLog($"🛑 Emg_Stop(軸{NodeID})");
+            if (NodeID < 6)
+            {
+                StopAnimation(NodeID);
+                _mdone[NodeID] = 0; _speed[NodeID] = 0;
+                if (_bufferLength[NodeID] > 0) _bufferLength[NodeID] = 0;
+            }
+            MockLog($"Emg_Stop(軸{NodeID})");
             return 0;
         }
 
         public static ushort CS_ECAT_Slave_Motion_Sd_Stop(ushort CardNo, ushort NodeID, ushort SlotNo, double Tdec)
         {
-            if (NodeID < 6) { _mdone[NodeID] = 0; _speed[NodeID] = 0; }
+            if (NodeID < 6)
+            {
+                StopAnimation(NodeID);
+                _mdone[NodeID] = 0; _speed[NodeID] = 0;
+                if (_bufferLength[NodeID] > 0) _bufferLength[NodeID] = 0;
+            }
             MockLog($"Sd_Stop(軸{NodeID}, {Tdec}s)");
+            return 0;
+        }
+
+        public static ushort CS_ECAT_Slave_CSP_Velocity_Change(ushort CardNo, ushort NodeID, ushort SlotNo, int NewSpeed, double Tsec)
+        {
+            if (NodeID < 6)
+            {
+                if (NewSpeed == 0)
+                {
+                    // 減速至 0：取消動畫，凍結在當前位置
+                    StopAnimation(NodeID);
+                    _speed[NodeID] = 0;
+                }
+                else
+                {
+                    _speed[NodeID] = NewSpeed;
+                }
+            }
+            MockLog($"CSP_Velocity_Change(軸{NodeID}, NewSpd={NewSpeed}, Tsec={Tsec})");
             return 0;
         }
 

@@ -34,4 +34,12 @@
     <ProjectReference Include="..\Robot.Core\Robot.Core.csproj" />
   </ItemGroup>
 
+  <!-- 將 monitor.html + meshes/ 嵌入 DLL，引用者免設定 -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\Robot.MockConsole\monitor.html" LogicalName="monitor.html" />
+    <EmbeddedResource Include="..\Robot.MockConsole\meshes\**">
+      <LogicalName>meshes/%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
 </Project>

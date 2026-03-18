@@ -446,8 +446,9 @@ namespace Robot.Driver.Delta
             }
             _axisNum = slaveNum;
 
-            // 2. 讀取零點設定
-            LoadZeroConfig();
+            // 2. 讀取零點設定（Mock 模式不讀寫設定檔）
+            if (!_isMockBackend)
+                LoadZeroConfig();
 
             // 3. 對每軸設定
             for (ushort i = 0; i < AXIS_COUNT; i++)
@@ -472,13 +473,14 @@ namespace Robot.Driver.Delta
                 _log.DllReturn("Virtual_Set_Enable", ret, $"軸{i}");
                 if (ret != 0) return false;
 
-                // 讀取當前實際位置（絕對編碼器脈波數）
+                // 讀取當前實際位置並設定虛擬座標
                 int pos = 0;
                 _ecat.CS_ECAT_Slave_Motion_Get_Actual_Position(_cardNo, i, 0, ref pos);
                 _log.DllReturn("Get_Actual_Position", 0, $"軸{i}:真實位置={pos}");
 
-                // 設定當前位置
-                int initPos = (int)(1000L * (pos - _zeroPulse[i]) / _pulse2Ang[i]);
+                // Mock 模式：pos 已是 mdeg，直接使用
+                // Real 模式：pos 是 encoder pulse，需轉換
+                int initPos = _isMockBackend ? pos : (int)(1000L * (pos - _zeroPulse[i]) / _pulse2Ang[i]);
                 ret = _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Command(_cardNo, i, 0, initPos);
                 _log.DllReturn("Virtual_Set_Command", ret, $"軸{i}: 當前位置={initPos}");
                 
@@ -547,6 +549,12 @@ namespace Robot.Driver.Delta
         /// </summary>
         private bool DoCalibrate()
         {
+            if (_isMockBackend)
+            {
+                _log.Info("Mock 模式：略過原點標定");
+                return true;
+            }
+
             _log.Info("開始原點標定，讀取目前編碼器位置...");
             try
             {
@@ -596,7 +604,9 @@ namespace Robot.Driver.Delta
 
                 lock (_stateLock)
                 {
-                    _pos[i] = (int)(1000L * (pos - _zeroPulse[i]) / _pulse2Ang[i]);
+                    // Mock 模式：pos 已是 mdeg，不需轉換
+                    // Real 模式：pos 是 encoder pulse，需 (pulse - zeroPulse) * 1000 / pulse2Ang
+                    _pos[i] = _isMockBackend ? pos : (int)(1000L * (pos - _zeroPulse[i]) / _pulse2Ang[i]);
                     _speed[i] = speed;
 
                     // 檢查警報（StatusWord Bit3）

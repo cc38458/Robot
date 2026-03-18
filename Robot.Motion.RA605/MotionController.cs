@@ -470,7 +470,9 @@ namespace Robot.Motion.RA605
                 if (delta > maxDelta) maxDelta = delta;
             }
 
-            int moveTimeMs = maxSpeed > 0 ? Math.Max(100, (int)(maxDelta * 1000.0 / maxSpeed)) : 1000;
+            // 三角形速度曲線（strVel=0, endVel=0）峰值 = 2 * avgVel，
+            // 故需 moveTime = 2 * maxDelta / maxSpeed 才能確保峰值 ≤ maxSpeed
+            int moveTimeMs = maxSpeed > 0 ? Math.Max(300, (int)(maxDelta * 2000.0 / maxSpeed)) : 1000;
 
             _log.Info($"MoveRelativeEndEffector：Δ=[{dx},{dy},{dz}]mm, Δω=[{dYaw},{dPitch},{dRoll}]mdeg, 最大速度={maxSpeed}, 時間={moveTimeMs}ms");
 

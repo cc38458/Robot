@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.WebSockets;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using Robot.Core.Interfaces;
@@ -103,6 +104,7 @@ namespace Robot.Driver.Delta
             var reqPath = ctx.Request.Url?.AbsolutePath ?? "/";
             if (reqPath == "/") reqPath = "/monitor.html";
 
+            // 嘗試 1：從磁碟檔案提供（使用者有傳入 htmlPath 時）
             string? baseDir = _htmlPath != null ? Path.GetDirectoryName(Path.GetFullPath(_htmlPath)) : null;
             var relativePath = reqPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
             string? filePath = baseDir != null ? Path.Combine(baseDir, relativePath) : null;
@@ -111,45 +113,63 @@ namespace Robot.Driver.Delta
                 Path.GetFullPath(filePath).StartsWith(Path.GetFullPath(baseDir)) &&
                 File.Exists(filePath))
             {
-                var ext = Path.GetExtension(filePath).ToLowerInvariant();
-                resp.ContentType = ext switch
-                {
-                    ".html" => "text/html; charset=utf-8",
-                    ".js" => "application/javascript",
-                    ".css" => "text/css",
-                    ".json" => "application/json",
-                    ".stl" => "application/octet-stream",
-                    ".urdf" => "application/xml",
-                    ".png" => "image/png",
-                    ".jpg" or ".jpeg" => "image/jpeg",
-                    _ => "application/octet-stream",
-                };
-
-                resp.Headers.Add("Access-Control-Allow-Origin", "*");
-
-                var data = File.ReadAllBytes(filePath);
-                resp.ContentLength64 = data.Length;
-                resp.StatusCode = 200;
-                resp.OutputStream.Write(data, 0, data.Length);
-                resp.OutputStream.Close();
+                ServeBytes(resp, File.ReadAllBytes(filePath), GetContentType(filePath));
+                return;
             }
-            else
+
+            // 嘗試 2：從 DLL 嵌入式資源提供
+            var resourceName = reqPath.TrimStart('/');
+            var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName);
+            if (stream != null)
             {
-                var msg = "<!DOCTYPE html><html><body style='background:#111;color:#eee;font-family:monospace;padding:40px'>"
-                        + "<h2>RA605 Monitor Server — 404</h2>"
-                        + "<p>WebSocket: ws://localhost:" + _port + "/</p>"
-                        + $"<p>Requested: {reqPath}</p>"
-                        + $"<p>Resolved: {filePath ?? "null"}</p>"
-                        + $"<p>BaseDir: {baseDir ?? "null"}</p>"
-                        + "<p>Place monitor.html + meshes/ in the same directory.</p>"
-                        + "</body></html>";
-                var data = Encoding.UTF8.GetBytes(msg);
-                resp.ContentType = "text/html; charset=utf-8";
-                resp.ContentLength64 = data.Length;
-                resp.StatusCode = 404;
-                resp.OutputStream.Write(data, 0, data.Length);
-                resp.OutputStream.Close();
+                using (stream)
+                {
+                    var data = new byte[stream.Length];
+                    stream.ReadExactly(data, 0, data.Length);
+                    ServeBytes(resp, data, GetContentType(resourceName));
+                }
+                return;
             }
+
+            // 404
+            var msg = "<!DOCTYPE html><html><body style='background:#111;color:#eee;font-family:monospace;padding:40px'>"
+                    + "<h2>RA605 Monitor Server — 404</h2>"
+                    + "<p>WebSocket: ws://localhost:" + _port + "/</p>"
+                    + $"<p>Requested: {reqPath}</p>"
+                    + "</body></html>";
+            var msgData = Encoding.UTF8.GetBytes(msg);
+            resp.ContentType = "text/html; charset=utf-8";
+            resp.ContentLength64 = msgData.Length;
+            resp.StatusCode = 404;
+            resp.OutputStream.Write(msgData, 0, msgData.Length);
+            resp.OutputStream.Close();
+        }
+
+        private static void ServeBytes(HttpListenerResponse resp, byte[] data, string contentType)
+        {
+            resp.ContentType = contentType;
+            resp.Headers.Add("Access-Control-Allow-Origin", "*");
+            resp.ContentLength64 = data.Length;
+            resp.StatusCode = 200;
+            resp.OutputStream.Write(data, 0, data.Length);
+            resp.OutputStream.Close();
+        }
+
+        private static string GetContentType(string path)
+        {
+            var ext = Path.GetExtension(path).ToLowerInvariant();
+            return ext switch
+            {
+                ".html" => "text/html; charset=utf-8",
+                ".js" => "application/javascript",
+                ".css" => "text/css",
+                ".json" => "application/json",
+                ".stl" => "application/octet-stream",
+                ".urdf" => "application/xml",
+                ".png" => "image/png",
+                ".jpg" or ".jpeg" => "image/jpeg",
+                _ => "application/octet-stream",
+            };
         }
 
         private async Task HandleWebSocket(WebSocket socket, CancellationToken ct)
