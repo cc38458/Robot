@@ -478,8 +478,9 @@ namespace Robot.Driver.Delta
                 _log.DllReturn("Get_Actual_Position", 0, $"軸{i}:真實位置={pos}");
 
                 // 設定當前位置
-                ret = _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Command(_cardNo, i, 0,1000 * (pos - _zeroPulse[i]) / _pulse2Ang[i]);
-                _log.DllReturn("Virtual_Set_Command", ret, $"軸{i}: 當前位置={1000 * (pos - _zeroPulse[i]) / _pulse2Ang[i]}");
+                int initPos = (int)(1000L * (pos - _zeroPulse[i]) / _pulse2Ang[i]);
+                ret = _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Command(_cardNo, i, 0, initPos);
+                _log.DllReturn("Virtual_Set_Command", ret, $"軸{i}: 當前位置={initPos}");
                 
 
                 lock (_stateLock) { _state[i] = MotorState.STOP; }
@@ -595,7 +596,7 @@ namespace Robot.Driver.Delta
 
                 lock (_stateLock)
                 {
-                    _pos[i] = 1000 * (pos - _zeroPulse[i]) / _pulse2Ang[i];
+                    _pos[i] = (int)(1000L * (pos - _zeroPulse[i]) / _pulse2Ang[i]);
                     _speed[i] = speed;
 
                     // 檢查警報（StatusWord Bit3）
