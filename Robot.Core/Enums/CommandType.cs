@@ -22,5 +22,8 @@ namespace Robot.Core.Enums
 
         /// <summary>多軸同步 PVT（末端移動用，barrier 同步發送）</summary>
         MultiAxisPVT,
+
+        /// <summary>變更移動速度（單軸 CSP Velocity Change）</summary>
+        VelocityChange,
     }
 }

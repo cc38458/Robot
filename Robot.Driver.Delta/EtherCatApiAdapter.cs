@@ -29,6 +29,8 @@ namespace Robot.Driver.Delta
         ushort CS_ECAT_Slave_Motion_Sd_Stop(ushort CardNo, ushort NodeID, ushort SlotNo, double Tdec);
         ushort CS_ECAT_Slave_Motion_Ralm(ushort CardNo, ushort NodeID, ushort SlotNo);
 
+        ushort CS_ECAT_Slave_CSP_Velocity_Change(ushort CardNo, ushort NodeID, ushort SlotNo, int NewSpeed, double Tsec);
+
         ushort CS_ECAT_Slave_CSP_Start_Move(ushort CardNo, ushort NodeID, ushort SlotNo,
             int Dist, int StrVel, int ConstVel, int EndVel, double Tacc, double Tdec, ushort SCurve, ushort IsAbs);
 
@@ -71,6 +73,8 @@ namespace Robot.Driver.Delta
         public ushort CS_ECAT_Slave_Motion_Sd_Stop(ushort CardNo, ushort NodeID, ushort SlotNo, double Tdec) => CEtherCAT_DLL.CS_ECAT_Slave_Motion_Sd_Stop(CardNo, NodeID, SlotNo, Tdec);
         public ushort CS_ECAT_Slave_Motion_Ralm(ushort CardNo, ushort NodeID, ushort SlotNo) => CEtherCAT_DLL.CS_ECAT_Slave_Motion_Ralm(CardNo, NodeID, SlotNo);
 
+        public ushort CS_ECAT_Slave_CSP_Velocity_Change(ushort CardNo, ushort NodeID, ushort SlotNo, int NewSpeed, double Tsec) => CEtherCAT_DLL.CS_ECAT_Slave_CSP_Velocity_Change(CardNo, NodeID, SlotNo, NewSpeed, Tsec);
+
         public ushort CS_ECAT_Slave_CSP_Start_Move(ushort CardNo, ushort NodeID, ushort SlotNo, int Dist, int StrVel, int ConstVel, int EndVel, double Tacc, double Tdec, ushort SCurve, ushort IsAbs)
             => CEtherCAT_DLL.CS_ECAT_Slave_CSP_Start_Move(CardNo, NodeID, SlotNo, Dist, StrVel, ConstVel, EndVel, Tacc, Tdec, SCurve, IsAbs);
 
@@ -112,6 +116,8 @@ namespace Robot.Driver.Delta
         public ushort CS_ECAT_Slave_Motion_Emg_Stop(ushort CardNo, ushort NodeID, ushort SlotNo) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Emg_Stop(CardNo, NodeID, SlotNo);
         public ushort CS_ECAT_Slave_Motion_Sd_Stop(ushort CardNo, ushort NodeID, ushort SlotNo, double Tdec) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Sd_Stop(CardNo, NodeID, SlotNo, Tdec);
         public ushort CS_ECAT_Slave_Motion_Ralm(ushort CardNo, ushort NodeID, ushort SlotNo) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Ralm(CardNo, NodeID, SlotNo);
+
+        public ushort CS_ECAT_Slave_CSP_Velocity_Change(ushort CardNo, ushort NodeID, ushort SlotNo, int NewSpeed, double Tsec) => 0; // Mock 直接回傳成功
 
         public ushort CS_ECAT_Slave_CSP_Start_Move(ushort CardNo, ushort NodeID, ushort SlotNo, int Dist, int StrVel, int ConstVel, int EndVel, double Tacc, double Tdec, ushort SCurve, ushort IsAbs)
             => CEtherCAT_Mock.CS_ECAT_Slave_CSP_Start_Move(CardNo, NodeID, SlotNo, Dist, StrVel, ConstVel, EndVel, Tacc, Tdec, SCurve, IsAbs);

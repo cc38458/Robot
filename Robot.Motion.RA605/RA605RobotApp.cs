@@ -148,10 +148,29 @@ namespace Robot.Motion.RA605
             => _motion.UpdateContinuousMove(deltaX, deltaY, deltaZ, deltaYaw, deltaPitch, deltaRoll);
 
         /// <summary>
+        /// 指定軸立即停止（無視該軸隊列，透過變速減速至 0 後停止）。
+        /// </summary>
+        /// <param name="axis">軸號（0-5）。</param>
+        /// <param name="tDec">減速時間（秒），預設 0.5。</param>
+        /// <returns>成功回傳 true，否則 false。</returns>
+        public bool Stop(ushort axis, double tDec = 0.5)
+            => _driver.Stop(axis, tDec);
+
+        /// <summary>
         /// 停止末端持續相對移動。
         /// </summary>
         /// <returns>停止成功回傳 true，否則 false。</returns>
         public bool StopContinuousMove() => _motion.StopContinuousMove();
+
+        /// <summary>
+        /// 變更指定軸的移動速度。
+        /// </summary>
+        /// <param name="axis">軸號（0-5）。</param>
+        /// <param name="newSpeed">新目標速度（mdeg/s）。</param>
+        /// <param name="tSec">速度變化時間（秒）。</param>
+        /// <returns>命令送出成功回傳 true，否則 false。</returns>
+        public bool ChangeVelocity(ushort axis, int newSpeed, double tSec)
+            => _driver.ChangeVelocity(axis, newSpeed, tSec);
 
         /// <summary>
         /// 單軸絕對角度移動。

@@ -32,6 +32,14 @@ namespace Robot.Core.Models
         /// <summary>減速時間（秒）</summary>
         public double TDec { get; set; }
 
+        // ── VelocityChange 專用欄位 ──
+
+        /// <summary>新目標速度（單位：mdeg/s）</summary>
+        public int NewTargetSpd { get; set; }
+
+        /// <summary>速度變化時間（秒）</summary>
+        public double TSec { get; set; }
+
         // ── PVT 專用欄位 ──
 
         /// <summary>PVT 資料筆數</summary>
@@ -84,6 +92,7 @@ namespace Robot.Core.Models
                 CommandType.MovePT => $"[MovePT] 軸{Axis} {DataCount}筆",
                 CommandType.Stop => $"[Stop] 軸{Axis} 減速{TDec}s",
                 CommandType.MultiAxisPVT => $"[MultiPVT] 6軸同步 {MultiDataCount?[0]}筆",
+                CommandType.VelocityChange => $"[VelChange] 軸{Axis} → {NewTargetSpd} mdeg/s, {TSec}s",
                 _ => $"[{Type}] 軸{Axis}",
             };
         }

@@ -40,6 +40,11 @@ namespace Robot.Driver.Delta
         private volatile bool _ralmRequested = false;
         private volatile bool _sdStopAllRequested = false; // 看門狗觸發用
 
+        // ── 立即停止請求（每軸獨立，無視隊列） ──
+        private readonly bool[] _immediateStopRequested = new bool[AXIS_COUNT];
+        private readonly double[] _immediateStopTDec = new double[AXIS_COUNT];
+        private readonly object _immediateStopLock = new();
+
         // ── 指令隊列（每軸獨立） ──
         private readonly Queue<MotionCommand>[] _queues = new Queue<MotionCommand>[AXIS_COUNT];
         private readonly object _queueLock = new();
@@ -195,6 +200,29 @@ namespace Robot.Driver.Delta
             _log.Info("收到警報復歸請求");
         }
 
+        /// <summary>
+        /// 主線程呼叫：立即停止指定軸（無視該軸隊列）
+        /// 流程：清除該軸隊列 → VelocityChange(0, tDec) → 等待 tDec → Sd_Stop
+        /// </summary>
+        public void RequestImmediateStop(ushort axis, double tDec)
+        {
+            if (axis >= AXIS_COUNT) return;
+
+            // 先清除該軸隊列
+            lock (_queueLock)
+            {
+                _queues[axis].Clear();
+                UpdateQueueLengths();
+            }
+
+            lock (_immediateStopLock)
+            {
+                _immediateStopRequested[axis] = true;
+                _immediateStopTDec[axis] = tDec;
+            }
+            _log.Info($"收到軸 {axis} 立即停止請求 (tDec={tDec}s)");
+        }
+
         // ════════════════════════════════════════
         // 指令入隊（主線程呼叫）
         // ════════════════════════════════════════
@@ -286,6 +314,9 @@ namespace Robot.Driver.Delta
                         DoSdStopAll();
                         _sdStopAllRequested = false;
                     }
+
+                    // ── 立即停止請求（每軸獨立） ──
+                    DoImmediateStopIfRequested();
 
                     // ── 初始化請求 ──
                     if (_initRequested)
@@ -665,8 +696,8 @@ namespace Robot.Driver.Delta
                         continue;
                     }
 
-                    // Stop 指令可在 MOVING 時執行
-                    if (cmd.Type == CommandType.Stop)
+                    // Stop / VelocityChange 指令可在 MOVING 時執行
+                    if (cmd.Type == CommandType.Stop || cmd.Type == CommandType.VelocityChange)
                     {
                         ExecuteCommand(cmd);
                         _queues[i].Dequeue();
@@ -739,6 +770,11 @@ namespace Robot.Driver.Delta
                     ret = _ecat.CS_ECAT_Slave_Motion_Sd_Stop(_cardNo, cmd.Axis, 0, cmd.TDec);
                     _log.DllReturn("Sd_Stop", ret, $"軸{cmd.Axis}");
                     break;
+
+                case CommandType.VelocityChange:
+                    ret = _ecat.CS_ECAT_Slave_CSP_Velocity_Change(_cardNo, cmd.Axis, 0, cmd.NewTargetSpd, cmd.TSec);
+                    _log.DllReturn("CSP_Velocity_Change", ret, $"軸{cmd.Axis} → {cmd.NewTargetSpd} mdeg/s, {cmd.TSec}s");
+                    break;
             }
         }
 
@@ -810,6 +846,45 @@ namespace Robot.Driver.Delta
             {
                 var ret = _ecat.CS_ECAT_Slave_Motion_Sd_Stop(_cardNo, i, 0, DEFAULT_SDSTOP_TDEC);
                 _log.DllReturn("Sd_Stop", ret, $"軸{i}");
+            }
+        }
+
+        /// <summary>
+        /// 處理各軸立即停止請求：VelocityChange(0, tDec) → 等待 tDec → Sd_Stop
+        /// 此操作在通訊線程中執行，會阻塞 tDec 秒（等待減速完成）
+        /// </summary>
+        private void DoImmediateStopIfRequested()
+        {
+            for (ushort i = 0; i < AXIS_COUNT; i++)
+            {
+                bool requested = false;
+                double tDec = 0;
+
+                lock (_immediateStopLock)
+                {
+                    if (_immediateStopRequested[i])
+                    {
+                        requested = true;
+                        tDec = _immediateStopTDec[i];
+                        _immediateStopRequested[i] = false;
+                    }
+                }
+
+                if (!requested) continue;
+
+                _log.Info($"軸 {i} 立即停止：VelocityChange(0, {tDec}s) → 等待 → Sd_Stop");
+
+                // Step 1: 變速至 0
+                var ret = _ecat.CS_ECAT_Slave_CSP_Velocity_Change(_cardNo, i, 0, 0, tDec);
+                _log.DllReturn("CSP_Velocity_Change", ret, $"軸{i} → 0 mdeg/s, {tDec}s");
+
+                // Step 2: 等待減速完成
+                int waitMs = (int)(tDec * 1000) + 50; // 多等 50ms 確保完成
+                Thread.Sleep(waitMs);
+
+                // Step 3: Sd_Stop 確保完全停止
+                ret = _ecat.CS_ECAT_Slave_Motion_Sd_Stop(_cardNo, i, 0, 0.05);
+                _log.DllReturn("Sd_Stop", ret, $"軸{i} (立即停止最終確認)");
             }
         }
 

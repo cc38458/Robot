@@ -175,11 +175,22 @@ namespace Robot.Driver.Delta
             if (!ValidateMotionPrecondition(axis)) return false;
             if (tDec <= 0) { _log.Warn("Stop() 拒絕：tDec 必須 > 0"); return false; }
 
+            // 無視該軸隊列，立即執行：變速至0 → 等待 → sd_stop
+            _comm.RequestImmediateStop(axis, tDec);
+            return true;
+        }
+
+        public bool ChangeVelocity(ushort axis, int newSpeed, double tSec)
+        {
+            if (!ValidateMotionPrecondition(axis)) return false;
+            if (tSec <= 0) { _log.Warn("ChangeVelocity() 拒絕：tSec 必須 > 0"); return false; }
+
             return _comm.EnqueueCommand(new MotionCommand
             {
-                Type = CommandType.Stop,
+                Type = CommandType.VelocityChange,
                 Axis = axis,
-                TDec = tDec,
+                NewTargetSpd = newSpeed,
+                TSec = tSec,
             });
         }
 

@@ -80,12 +80,22 @@ namespace Robot.Core.Interfaces
         // ════════════════════════════════════════
 
         /// <summary>
-        /// 指定軸軟減速停止
+        /// 指定軸軟減速停止（無視該軸隊列，立即執行）
+        /// 流程：先透過 VelocityChange 將速度減至 0 → 等待減速完成 → 執行 Sd_Stop
         /// 前提：AxisCardState == READY，axis ∈ [0,5]，tDec > 0
         /// </summary>
         /// <param name="axis">軸號（0–5）</param>
         /// <param name="tDec">減速時間（秒）</param>
         bool Stop(ushort axis, double tDec);
+
+        /// <summary>
+        /// 變更指定軸的移動速度（透過指令隊列執行）
+        /// 前提：AxisCardState == READY，axis ∈ [0,5]
+        /// </summary>
+        /// <param name="axis">軸號（0–5）</param>
+        /// <param name="newSpeed">新目標速度（mdeg/s）</param>
+        /// <param name="tSec">速度變化時間（秒）</param>
+        bool ChangeVelocity(ushort axis, int newSpeed, double tSec);
 
         /// <summary>
         /// 指定軸以梯形速度曲線移動至絕對位置
