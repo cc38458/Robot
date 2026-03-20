@@ -55,7 +55,7 @@ namespace Robot.Motion.RA605
 
             float[] a = new float[6];
             for (int i = 0; i < 6; i++)
-                a[i] = angles[i] * DEG2RAD;
+                a[i] = angles[i] * DEG2RAD; 
 
             var m1 = Matrix4x4.CreateRotationX(RAD90)
                    * Matrix4x4.CreateTranslation(A1, 0, D1)
@@ -254,6 +254,8 @@ namespace Robot.Motion.RA605
                         diagnostic = $"IK近奇異: OC=({ocX:F1},{ocY:F1},{ocZ:F1}) arm=[{candidate[0]:F1},{candidate[1]:F1},{candidate[2]:F1}] wrist=[{candidate[3]:F1},{candidate[4]:F1},{candidate[5]:F1}]"
                             + $"{(nearArmSingularity ? " arm" : "")}{(nearWristSingularity ? " wrist" : "")}";
                     }
+                    for (int i = 0; i < candidate.Length; i++)
+                        candidate[i] = -candidate[i]; // 反轉角度符號
                     return candidate;
                 }
             }
