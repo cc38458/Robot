@@ -4,7 +4,10 @@
       "Bash(dotnet build:*)",
       "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" build 2>&1 | tail -30)",
       "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" build 2>&1 | grep -E \"錯誤|error|Build succeeded\")",
-      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" build 2>&1 | grep -E \"錯誤|error\")"
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" build 2>&1 | grep -E \"錯誤|error\")",
+      "Bash(git status:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

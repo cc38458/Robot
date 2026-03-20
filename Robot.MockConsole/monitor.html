@@ -308,8 +308,9 @@ loadAllMeshes();
 // Update joint angles
 // ═══════════════════════════════════════
 function updateArm(angDeg) {
-  // 方向校正：J3 維持原方向，其餘軸反向
-  const axisDirFix = [1, 1, -1, 1, 1, 1];
+  // JOINTS[i].axis 已描述各關節在模型中的正方向。
+  // 若再套一次全域反號，會造成六軸顯示全部與實體相反。
+  const axisDirFix = [-1, -1, 1, -1, -1, -1];
   // J5（index 4）3D模型預設垂直向下，運動學模型預設水平向前，預補 +90°
   const preOffset = [0, 0, 0, 0, Math.PI / 2, 0];
   for (let i = 0; i < 6; i++) {
