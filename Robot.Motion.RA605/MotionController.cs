@@ -38,6 +38,7 @@ namespace Robot.Motion.RA605
         // 前一批次 PVT 的末速度（mdeg/s），作為下批次的 strVel，確保批次銜接速度連續
         private readonly int[] _prevBatchEndVel = new int[AXIS_COUNT];
 
+        /// <summary>底層軸卡驅動介面。</summary>
         public IAxisCard AxisCard { get; }
 
         /// <summary>
@@ -64,6 +65,12 @@ namespace Robot.Motion.RA605
             }
         }
 
+        /// <summary>
+        /// 建立高階運動控制器。
+        /// </summary>
+        /// <param name="axisCard">底層軸卡驅動介面。</param>
+        /// <param name="logger">日誌記錄器。</param>
+        /// <param name="toolLength">工具頭長度（mm）。</param>
         public MotionController(IAxisCard axisCard, RobotLogger logger, float toolLength = 0f)
         {
             AxisCard = axisCard;
@@ -75,6 +82,7 @@ namespace Robot.Motion.RA605
         // 末端絕對姿態移動
         // ════════════════════════════════════════
 
+        /// <inheritdoc />
         public bool MoveToPosture(Matrix4x4 targetPosture, int moveTimeMs)
         {
             if (AxisCard.AxisCardState != CardState.READY)
@@ -121,6 +129,7 @@ namespace Robot.Motion.RA605
         // 末端持續相對移動
         // ════════════════════════════════════════
 
+        /// <inheritdoc />
         public bool StartContinuousMove(float deltaX, float deltaY, float deltaZ,
                                          float deltaYaw, float deltaPitch, float deltaRoll)
         {
@@ -155,6 +164,7 @@ namespace Robot.Motion.RA605
             return true;
         }
 
+        /// <inheritdoc />
         public bool UpdateContinuousMove(float deltaX, float deltaY, float deltaZ,
                                           float deltaYaw, float deltaPitch, float deltaRoll)
         {
@@ -181,6 +191,7 @@ namespace Robot.Motion.RA605
             return true;
         }
 
+        /// <inheritdoc />
         public bool StopContinuousMove()
         {
             if (!_continuousRunning) return true;
@@ -410,6 +421,7 @@ namespace Robot.Motion.RA605
         // 末端一次性相對移動
         // ════════════════════════════════════════
 
+        /// <inheritdoc />
         public bool MoveRelativeEndEffector(float dx, float dy, float dz,
                                              float dYaw, float dPitch, float dRoll,
                                              int maxSpeed)
@@ -499,6 +511,7 @@ namespace Robot.Motion.RA605
         // 軸空間運動
         // ════════════════════════════════════════
 
+        /// <inheritdoc />
         public bool MoveAxisAbsolute(ushort axis, int angleMdeg, int constVel,
                                       double tAcc, double tDec)
         {
@@ -506,6 +519,7 @@ namespace Robot.Motion.RA605
             return AxisCard.MoveAbsolute(axis, angleMdeg, 0, constVel, 0, tAcc, tDec);
         }
 
+        /// <inheritdoc />
         public bool MoveAxisRelative(ushort axis, int deltaAngleMdeg, int constVel,
                                       double tAcc, double tDec)
         {
@@ -513,6 +527,7 @@ namespace Robot.Motion.RA605
             return AxisCard.MoveRelative(axis, deltaAngleMdeg, 0, constVel, 0, tAcc, tDec);
         }
 
+        /// <inheritdoc />
         public bool MoveHome(int constVel, double tAcc, double tDec)
         {
             _log.Info("MoveHome：所有軸回原點");
@@ -521,6 +536,7 @@ namespace Robot.Motion.RA605
 
         // ════════════════════════════════════════
 
+        /// <summary>停止持續移動並釋放資源。</summary>
         public void Dispose()
         {
             StopContinuousMove();

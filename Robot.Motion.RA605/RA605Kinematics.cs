@@ -32,6 +32,10 @@ namespace Robot.Motion.RA605
         /// <summary>工具頭長度（mm）</summary>
         public float ToolLength { get; set; }
 
+        /// <summary>
+        /// 建立 RA605 運動學計算器。
+        /// </summary>
+        /// <param name="toolLength">工具頭長度（mm），預設 0。</param>
         public RA605Kinematics(float toolLength = 0f)
         {
             ToolLength = toolLength;
@@ -76,7 +80,7 @@ namespace Robot.Motion.RA605
             return m6 * m5 * m4 * m3 * m2 * m1;
         }
 
-        /// <summary>正向運動學（mdeg 版本）</summary>
+        /// <summary>正向運動學（mdeg 版本）：將千分之一度轉為度後呼叫 Forward。</summary>
         public Matrix4x4 ForwardMdeg(int[] anglesMdeg)
         {
             float[] deg = new float[6];
@@ -97,6 +101,13 @@ namespace Robot.Motion.RA605
         public float[]? Inverse(Matrix4x4 eePosture, float[]? refAngles = null)
             => Inverse(eePosture, refAngles, out _);
 
+        /// <summary>
+        /// 逆向運動學（帶診斷輸出版本）。
+        /// </summary>
+        /// <param name="eePosture">目標末端齊次矩陣。</param>
+        /// <param name="refAngles">當前關節角度（度），用於選擇最近解。</param>
+        /// <param name="diagnostic">診斷訊息（失敗原因或奇異點警告）。</param>
+        /// <returns>6 軸角度（度），無解回傳 null。</returns>
         public float[]? Inverse(Matrix4x4 eePosture, float[]? refAngles, out string? diagnostic)
         {
             diagnostic = null;
@@ -258,6 +269,7 @@ namespace Robot.Motion.RA605
         public int[]? InverseMdeg(Matrix4x4 eePosture, int[]? refMdeg = null)
             => InverseMdeg(eePosture, refMdeg, out _);
 
+        /// <summary>逆向運動學（mdeg 版本，帶診斷輸出）。</summary>
         public int[]? InverseMdeg(Matrix4x4 eePosture, int[]? refMdeg, out string? diagnostic)
         {
             float[]? refAngles = refMdeg?.Select(m => m / 1000f).ToArray();
@@ -354,6 +366,7 @@ namespace Robot.Motion.RA605
             return reference + diff;
         }
 
+        /// <summary>檢查所有關節角度是否在物理限位範圍內。</summary>
         private static bool IsWithinJointLimits(float[] angles)
         {
             for (int i = 0; i < 6; i++)
@@ -364,6 +377,7 @@ namespace Robot.Motion.RA605
             return true;
         }
 
+        /// <summary>取得第一個超出限位的關節描述字串。</summary>
         private static string GetLimitFailure(float[] angles)
         {
             for (int i = 0; i < 6; i++)
@@ -374,6 +388,7 @@ namespace Robot.Motion.RA605
             return "OK";
         }
 
+        /// <summary>將角度（弧度）正規化至 [-π, π] 範圍。</summary>
         private static float WrapToPi(float angle)
         {
             angle -= MathF.Round(angle / (2f * MathF.PI)) * (2f * MathF.PI);

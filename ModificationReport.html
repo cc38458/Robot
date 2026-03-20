@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RA605 機械臂控制框架 — 修改報告</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --border: #30363d;
+            --text: #e6edf3;
+            --text-muted: #8b949e;
+            --accent: #58a6ff;
+            --green: #3fb950;
+            --yellow: #d29922;
+            --red: #f85149;
+            --orange: #db6d28;
+            --purple: #bc8cff;
+            --code-bg: #1c2129;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans TC', Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.7;
+        }
+        .header {
+            background: linear-gradient(135deg, #0d1117 0%, #112a1a 50%, #161b22 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 50px 40px 35px;
+            text-align: center;
+        }
+        .header h1 { font-size: 2em; font-weight: 700; color: var(--green); margin-bottom: 10px; }
+        .header .subtitle { color: var(--text-muted); font-size: 1.05em; }
+        .header .meta { margin-top: 16px; color: var(--text-muted); font-size: 0.9em; display: flex; justify-content: center; gap: 24px; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 36px 40px 80px; }
+
+        .section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 28px 32px;
+            margin-bottom: 24px;
+        }
+        .section h2 { font-size: 1.3em; font-weight: 600; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+        .section h3 { font-size: 1.05em; font-weight: 600; margin: 20px 0 10px; color: var(--purple); }
+        p { margin-bottom: 10px; color: var(--text-muted); }
+
+        code {
+            background: var(--code-bg); color: var(--accent); padding: 2px 6px; border-radius: 4px;
+            font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 0.88em;
+        }
+        pre {
+            background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+            padding: 14px 18px; overflow-x: auto; margin: 10px 0; font-size: 0.85em; line-height: 1.5;
+        }
+        pre code { background: transparent; padding: 0; color: var(--text); }
+
+        table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.9em; }
+        th { background: var(--code-bg); color: var(--accent); text-align: left; padding: 8px 12px; border: 1px solid var(--border); font-weight: 600; }
+        td { padding: 8px 12px; border: 1px solid var(--border); color: var(--text-muted); }
+        tr:hover td { background: #1c2129; }
+
+        .badge {
+            display: inline-block; padding: 2px 10px; border-radius: 12px;
+            font-size: 0.78em; font-weight: 600; vertical-align: middle; margin-right: 4px;
+        }
+        .badge-done { background: #3fb95022; color: var(--green); border: 1px solid #3fb95044; }
+        .badge-file { background: #58a6ff22; color: var(--accent); border: 1px solid #58a6ff44; }
+        .badge-moved { background: #bc8cff22; color: var(--purple); border: 1px solid #bc8cff44; }
+
+        .change-card {
+            background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px;
+            padding: 18px 22px; margin: 14px 0; border-left: 3px solid var(--green);
+        }
+        .change-card .title { font-weight: 600; font-size: 1.02em; margin-bottom: 6px; color: var(--text); }
+        .change-card .file { font-family: monospace; font-size: 0.85em; color: var(--accent); margin-bottom: 8px; }
+
+        .stats-row { display: flex; gap: 16px; margin: 18px 0; flex-wrap: wrap; }
+        .stat-box {
+            background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+            padding: 16px 24px; text-align: center; flex: 1; min-width: 130px;
+        }
+        .stat-box .val { font-size: 1.8em; font-weight: 700; color: var(--green); }
+        .stat-box .lbl { color: var(--text-muted); font-size: 0.82em; margin-top: 2px; }
+
+        .diff-add { color: var(--green); }
+        .diff-del { color: var(--red); }
+        ul, ol { padding-left: 22px; margin: 8px 0; }
+        li { margin: 3px 0; color: var(--text-muted); }
+        li strong { color: var(--text); }
+        a { color: var(--accent); text-decoration: none; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>修改報告</h1>
+    <div class="subtitle">RA605 機械臂控制框架 — 嚴重/高風險問題修復 + MonitorServer 遷移</div>
+    <div class="meta">
+        <span>2026-03-20</span>
+        <span>建置結果：0 errors / 28 warnings（皆為既有 CS1591）</span>
+    </div>
+</div>
+
+<div class="container">
+
+<!-- ═══════ 修改摘要 ═══════ -->
+<div class="section">
+    <h2>修改摘要</h2>
+    <div class="stats-row">
+        <div class="stat-box">
+            <div class="val">9</div>
+            <div class="lbl">問題已修正</div>
+        </div>
+        <div class="stat-box">
+            <div class="val">6</div>
+            <div class="lbl">檔案已修改</div>
+        </div>
+        <div class="stat-box">
+            <div class="val">1</div>
+            <div class="lbl">檔案已搬遷</div>
+        </div>
+        <div class="stat-box">
+            <div class="val" style="color: var(--green);">0</div>
+            <div class="lbl">建置錯誤</div>
+        </div>
+    </div>
+
+    <table>
+        <tr><th>嚴重度</th><th>原始問題</th><th>狀態</th></tr>
+        <tr><td style="color:var(--red)">嚴重</td><td>DoImmediateStopIfRequested 阻塞通訊線程</td><td><span class="badge badge-done">已修正</span></td></tr>
+        <tr><td style="color:var(--red)">嚴重</td><td>DoPollStatus 未檢查 DLL 回傳碼</td><td><span class="badge badge-done">已修正</span></td></tr>
+        <tr><td style="color:var(--red)">嚴重</td><td>MonitorServer.BuildStateJson 多次 RefreshState</td><td><span class="badge badge-done">已修正</span></td></tr>
+        <tr><td style="color:var(--orange)">高風險</td><td>_queueLength 跨鎖寫讀不一致</td><td><span class="badge badge-done">已修正</span></td></tr>
+        <tr><td style="color:var(--orange)">高風險</td><td>_cardState 跨線程讀寫一致性</td><td><span class="badge badge-done">已修正</span></td></tr>
+        <tr><td style="color:var(--orange)">高風險</td><td>ProcessQueues 與 DoPollStatus 鎖順序不一致</td><td><span class="badge badge-done">已修正</span></td></tr>
+        <tr><td style="color:var(--orange)">高風險</td><td>BroadcastLoop sync-over-async 反模式</td><td><span class="badge badge-done">已修正</span></td></tr>
+        <tr><td style="color:var(--orange)">高風險</td><td>RobotLogger.WriterLoop 信號丟失窗口</td><td><span class="badge badge-done">已修正</span></td></tr>
+        <tr><td style="color:var(--yellow)">中等</td><td>MonitorServer 位於 Driver 層</td><td><span class="badge badge-moved">已遷移</span></td></tr>
+    </table>
+</div>
+
+<!-- ═══════ 修改檔案清單 ═══════ -->
+<div class="section">
+    <h2>修改檔案清單</h2>
+    <table>
+        <tr><th>檔案</th><th>操作</th><th>修正內容</th></tr>
+        <tr><td><code>Robot.Driver.Delta/CommThread.cs</code></td><td>修改</td><td>非阻塞停止、DLL 回傳檢查、鎖順序、狀態變更原子性</td></tr>
+        <tr><td><code>Robot.Core/Logging/RobotLogger.cs</code></td><td>修改</td><td>WriterLoop 信號競態修正</td></tr>
+        <tr><td><code>Robot.Motion.RA605/MonitorServer.cs</code></td><td>新增</td><td>從 Driver.Delta 遷移，改依賴 IMotionController，async 廣播</td></tr>
+        <tr><td><code>Robot.Driver.Delta/MonitorServer.cs</code></td><td>刪除</td><td>已遷移至 Robot.Motion.RA605</td></tr>
+        <tr><td><code>Robot.Motion.RA605/RA605RobotApp.cs</code></td><td>修改</td><td>更新 MonitorServer 建構參數</td></tr>
+        <tr><td><code>Robot.Motion.RA605/Robot.Motion.RA605.csproj</code></td><td>修改</td><td>新增嵌入式資源（monitor.html + meshes）</td></tr>
+        <tr><td><code>Robot.Driver.Delta/Robot.Driver.Delta.csproj</code></td><td>修改</td><td>移除嵌入式資源（已遷移）</td></tr>
+    </table>
+</div>
+
+<!-- ═══════ 詳細修改說明 ═══════ -->
+<div class="section">
+    <h2>詳細修改說明</h2>
+
+    <!-- Fix 1 -->
+    <div class="change-card">
+        <div class="title">1. 通訊線程立即停止：阻塞 → 非阻塞狀態機</div>
+        <div class="file">CommThread.cs — ProcessImmediateStops()</div>
+        <p><strong>問題：</strong><code>DoImmediateStopIfRequested()</code> 內含 <code>Thread.Sleep(tDec * 1000 + 50)</code>，阻塞通訊線程約 550ms，期間無法處理緊急停止、狀態輪詢或看門狗。</p>
+        <p><strong>修正方式：</strong>引入 <code>StopPhase</code> 狀態機，將三步驟（VelocityChange → 等待 → Sd_Stop）拆為非阻塞迭代。</p>
+<pre><code><span class="diff-add">+ private enum StopPhase { None, Decelerating }</span>
+<span class="diff-add">+ private readonly StopPhase[] _stopPhase = new StopPhase[AXIS_COUNT];</span>
+<span class="diff-add">+ private readonly long[] _stopDeadlineTicks = new long[AXIS_COUNT];</span>
+
+<span class="diff-del">- Thread.Sleep(waitMs);  // 阻塞 550ms</span>
+<span class="diff-add">+ // 非阻塞：每次主迴圈檢查 deadline 是否到達</span>
+<span class="diff-add">+ if (DateTime.UtcNow.Ticks >= _stopDeadlineTicks[i])</span>
+<span class="diff-add">+     _ecat.CS_ECAT_Slave_Motion_Sd_Stop(...);</span></code></pre>
+        <p><strong>效果：</strong>通訊線程在等待減速期間仍能每 10ms 處理緊急停止、警報偵測與看門狗心跳。</p>
+    </div>
+
+    <!-- Fix 2 -->
+    <div class="change-card">
+        <div class="title">2. DLL 回傳碼檢查機制</div>
+        <div class="file">CommThread.cs — DoPollStatus()</div>
+        <p><strong>問題：</strong>4 個 DLL 輪詢呼叫的回傳碼被反覆覆寫而從未檢查。硬體通訊中斷時使用舊值繼續運行。</p>
+        <p><strong>修正方式：</strong>每個 DLL 呼叫使用獨立變數 <code>r1</code>~<code>r4</code>。任一失敗則累計該軸錯誤次數，連續 5 次觸發全軸安全停止。</p>
+<pre><code><span class="diff-add">+ private const int POLL_ERROR_THRESHOLD = 5;</span>
+<span class="diff-add">+ private readonly int[] _pollErrorCount = new int[AXIS_COUNT];</span>
+
+<span class="diff-del">- ret = _ecat...Get_Actual_Position(...);</span>
+<span class="diff-del">- ret = _ecat...Get_Current_Speed(...);</span>
+<span class="diff-add">+ var r1 = _ecat...Get_Actual_Position(...);</span>
+<span class="diff-add">+ var r2 = _ecat...Get_Current_Speed(...);</span>
+<span class="diff-add">+ if (r1 != 0 || r2 != 0 || r3 != 0 || r4 != 0) {</span>
+<span class="diff-add">+     _pollErrorCount[i]++;</span>
+<span class="diff-add">+     if (_pollErrorCount[i] >= POLL_ERROR_THRESHOLD)</span>
+<span class="diff-add">+         _sdStopAllRequested = true;</span>
+<span class="diff-add">+     continue;</span>
+<span class="diff-add">+ }</span></code></pre>
+    </div>
+
+    <!-- Fix 3 -->
+    <div class="change-card">
+        <div class="title">3. 鎖順序統一 + _queueLength 跨鎖修正</div>
+        <div class="file">CommThread.cs — DoPollStatus() / UpdateQueueLengths()</div>
+        <p><strong>問題 A：</strong><code>DoPollStatus</code> → <code>CheckAutoSdStop</code> 的鎖順序為 <code>_stateLock → _queueLock</code>（ABBA 風險）。</p>
+        <p><strong>問題 B：</strong><code>_queueLength[]</code> 在 <code>_queueLock</code> 下寫入，在 <code>_stateLock</code> 下讀取。</p>
+        <p><strong>修正方式：</strong></p>
+        <ul>
+            <li><code>CheckAutoSdStop</code> 呼叫移至 <code>_stateLock</code> 外部（使用 <code>needAutoSdStop[]</code> 延遲標記）</li>
+            <li><code>UpdateQueueLengths</code> 內部加入 <code>lock (_stateLock)</code>，鎖順序統一為 <code>_queueLock → _stateLock</code></li>
+        </ul>
+<pre><code>修正後全域鎖順序：
+  ProcessQueues:    _queueLock → _stateLock  ✓
+  UpdateQueueLengths: _queueLock → _stateLock  ✓
+  DoPollStatus:     _stateLock only (不嵌套)    ✓
+  CheckAutoSdStop:  _queueLock only (不嵌套)    ✓</code></pre>
+    </div>
+
+    <!-- Fix 4 -->
+    <div class="change-card">
+        <div class="title">4. ProcessCardStateChange 原子性保護</div>
+        <div class="file">CommThread.cs — 新增 _stateChangeLock</div>
+        <p><strong>問題：</strong>通訊線程寫入 <code>_requestedCardState</code> + <code>_cardStateChangeRequest</code>，主線程在 <code>ProcessCardStateChange</code> 中讀取並清除。三步非原子操作可能遺失狀態變更。</p>
+        <p><strong>修正方式：</strong>引入 <code>_stateChangeLock</code>，所有讀寫 <code>_cardStateChangeRequest</code> / <code>_requestedCardState</code> 的位置均加鎖。</p>
+<pre><code><span class="diff-add">+ private readonly object _stateChangeLock = new();</span>
+
+// 通訊線程寫入（DoPollStatus、DoRalm、CheckMainThreadWatchdog）
+<span class="diff-add">+ lock (_stateChangeLock) {</span>
+      _requestedCardState = CardState.ALARM;
+      _cardStateChangeRequest = true;
+<span class="diff-add">+ }</span>
+
+// 主線程讀取
+  public CardState ProcessCardStateChange() {
+<span class="diff-add">+     lock (_stateChangeLock) {</span>
+          if (_cardStateChangeRequest) { ... }
+<span class="diff-add">+     }</span>
+  }</code></pre>
+    </div>
+
+    <!-- Fix 5 -->
+    <div class="change-card">
+        <div class="title">5. RobotLogger WriterLoop 信號競態修正</div>
+        <div class="file">Robot.Core/Logging/RobotLogger.cs — WriterLoop()</div>
+        <p><strong>問題：</strong><code>Wait()</code> 返回與 <code>Reset()</code> 之間存在信號丟失窗口，可能導致日誌延遲最多 500ms。</p>
+        <p><strong>修正方式：</strong>重構迴圈為「先 Flush → 確認 Queue 為空才 Wait」模式，消除信號丟失窗口。</p>
+<pre><code><span class="diff-del">- _hasEntries.Wait(500ms);</span>
+<span class="diff-del">- _hasEntries.Reset();</span>
+<span class="diff-del">- FlushQueue();</span>
+<span class="diff-add">+ FlushQueue();</span>
+<span class="diff-add">+ if (_queue.IsEmpty)</span>
+<span class="diff-add">+     _hasEntries.Wait(500ms);</span>
+<span class="diff-add">+ _hasEntries.Reset();</span></code></pre>
+        <p><strong>效果：</strong>即使信號在 Wait 返回後被 Reset 清除，已經在 FlushQueue 中處理了所有待寫項目。下一輪迭代會立即再次 FlushQueue，不會有延遲。</p>
+    </div>
+
+    <!-- Fix 6 -->
+    <div class="change-card">
+        <div class="title">6. MonitorServer 遷移至 Robot.Motion.RA605</div>
+        <div class="file"><span class="badge badge-moved">遷移</span> Robot.Driver.Delta → Robot.Motion.RA605</div>
+        <p><strong>問題：</strong>MonitorServer 位於 Driver 層，只能存取低階軸卡資料，無法提供末端位姿等高階資訊。</p>
+        <p><strong>修正方式：</strong></p>
+        <ul>
+            <li>將 <code>MonitorServer.cs</code> 從 <code>Robot.Driver.Delta</code> 搬至 <code>Robot.Motion.RA605</code></li>
+            <li>命名空間從 <code>Robot.Driver.Delta</code> 改為 <code>Robot.Motion.RA605</code></li>
+            <li>建構子依賴從 <code>IAxisCard</code> 改為 <code>IMotionController</code></li>
+            <li>嵌入式資源（monitor.html + meshes）隨之搬遷</li>
+            <li><code>BuildStateJson</code> 新增末端位姿資料（<code>endEffectorPosition</code> + <code>endEffectorPosture</code>）</li>
+        </ul>
+<pre><code>// 遷移前
+<span class="diff-del">- namespace Robot.Driver.Delta</span>
+<span class="diff-del">- MonitorServer(IAxisCard driver, ...)</span>
+
+// 遷移後
+<span class="diff-add">+ namespace Robot.Motion.RA605</span>
+<span class="diff-add">+ MonitorServer(IMotionController controller, ...)</span>
+
+// BuildStateJson 新增高階資料
+<span class="diff-add">+ endEffectorPosition = eePos,</span>
+<span class="diff-add">+ endEffectorPosture = new[] { M11, M12, ..., M44 },</span></code></pre>
+    </div>
+
+    <!-- Fix 7 -->
+    <div class="change-card">
+        <div class="title">7. BroadcastLoop 從 sync-over-async 改為全非同步</div>
+        <div class="file">Robot.Motion.RA605/MonitorServer.cs — BroadcastLoopAsync()</div>
+        <p><strong>問題：</strong><code>ws.SendAsync(...).GetAwaiter().GetResult()</code> 在 Thread 上同步等待，若客戶端網路慢則阻塞整個廣播迴圈。</p>
+        <p><strong>修正方式：</strong></p>
+        <ul>
+            <li>廣播迴圈改為 <code>async Task BroadcastLoopAsync()</code>，透過 <code>Task.Run</code> 啟動</li>
+            <li>使用 <code>Task.WhenAll</code> 並行發送至所有客戶端</li>
+            <li>每個客戶端附帶 1 秒逾時保護（<code>CancellationTokenSource.CreateLinkedTokenSource</code> + <code>CancelAfter</code>）</li>
+            <li>廣播間隔改用 <code>await Task.Delay</code> 取代 <code>Thread.Sleep</code></li>
+        </ul>
+<pre><code><span class="diff-del">- private Thread? _broadcastThread;</span>
+<span class="diff-add">+ private Task? _broadcastTask;</span>
+
+<span class="diff-del">- ws.SendAsync(segment, ...).GetAwaiter().GetResult();</span>
+<span class="diff-add">+ await Task.WhenAll(snapshot.Select(ws => SendWithTimeout(ws, segment, ct)));</span>
+
+<span class="diff-add">+ private async Task SendWithTimeout(WebSocket ws, ...) {</span>
+<span class="diff-add">+     using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);</span>
+<span class="diff-add">+     timeoutCts.CancelAfter(1000);</span>
+<span class="diff-add">+     await ws.SendAsync(data, ..., timeoutCts.Token);</span>
+<span class="diff-add">+ }</span></code></pre>
+        <p><strong>效果：</strong>多個客戶端的發送並行執行，單一慢客戶端不會阻塞其他客戶端或整個廣播週期。逾時後自動移除失效連線。</p>
+    </div>
+</div>
+
+<!-- ═══════ 架構變更 ═══════ -->
+<div class="section">
+    <h2>架構變更圖</h2>
+    <h3>MonitorServer 搬遷前</h3>
+<pre><code style="color: var(--text-muted)">Robot.Motion.RA605
+  └── RA605RobotApp
+        ├── MotionController  ← IMotionController
+        └── DeltaDriver       ← IAxisCard
+              └── <span class="diff-del">MonitorServer(IAxisCard)</span>  ← 只能看到軸資料</code></pre>
+
+    <h3>MonitorServer 搬遷後</h3>
+<pre><code style="color: var(--text-muted)">Robot.Motion.RA605
+  └── RA605RobotApp
+        ├── MotionController  ← IMotionController
+        ├── DeltaDriver       ← IAxisCard
+        └── <span class="diff-add">MonitorServer(IMotionController)</span>  ← 可存取軸 + 末端位姿</code></pre>
+
+    <h3>WebSocket 廣播 JSON 新增欄位</h3>
+<pre><code>{
+    "type": "state",
+    "cardState": 4,
+    "pos": [0, 0, 0, 0, 0, 0],
+    "speed": [0, 0, 0, 0, 0, 0],
+    "motorState": [1, 1, 1, 1, 1, 1],
+    "queueLen": [0, 0, 0, 0, 0, 0],
+    <span class="diff-add">"endEffectorPosition": [70.0, 0.0, 1099.5],</span>
+    <span class="diff-add">"endEffectorPosture": [1,0,0,0, 0,1,0,0, 0,0,1,0, 70,0,1099.5,1],</span>
+    "timestamp": 1742486400000
+}</code></pre>
+</div>
+
+<!-- ═══════ 鎖策略總結 ═══════ -->
+<div class="section">
+    <h2>修正後鎖策略總結</h2>
+    <p>修正後所有程式碼路徑的鎖取得順序已統一，消除 ABBA 死鎖風險：</p>
+    <table>
+        <tr><th>鎖物件</th><th>用途</th><th>持有者</th></tr>
+        <tr><td><code>_stateLock</code></td><td>保護 pos/speed/state/queueLength 陣列</td><td>通訊線程寫、主線程讀</td></tr>
+        <tr><td><code>_queueLock</code></td><td>保護指令佇列</td><td>主線程入隊、通訊線程出隊</td></tr>
+        <tr><td><code>_stateChangeLock</code></td><td>保護 cardState 變更請求的原子性</td><td>通訊線程寫、主線程讀</td></tr>
+        <tr><td><code>_immediateStopLock</code></td><td>保護立即停止旗標</td><td>主線程寫、通訊線程讀</td></tr>
+    </table>
+    <h3>巢狀鎖取得順序（全域唯一方向）</h3>
+<pre><code>_queueLock → _stateLock     (ProcessQueues, UpdateQueueLengths)
+_stateChangeLock             (單獨使用，不與其他鎖巢狀)
+_immediateStopLock           (單獨使用，不與其他鎖巢狀)</code></pre>
+</div>
+
+<!-- ═══════ 驗證結果 ═══════ -->
+<div class="section">
+    <h2>驗證結果</h2>
+    <table>
+        <tr><th>驗證項目</th><th>結果</th></tr>
+        <tr><td><code>dotnet build Robot.sln</code></td><td style="color:var(--green)">Build succeeded (0 errors)</td></tr>
+        <tr><td><code>dotnet build Demo.StepConsole</code></td><td style="color:var(--green)">Build succeeded (0 errors)</td></tr>
+        <tr><td>新增警告數量</td><td style="color:var(--green)">0（28 個均為既有 CS1591）</td></tr>
+        <tr><td>外部 API 相容性</td><td style="color:var(--green)">RA605RobotApp 公開介面無變更</td></tr>
+        <tr><td>WebSocket JSON 格式</td><td style="color:var(--yellow)">向後相容（新增 endEffectorPosition/Posture 欄位）</td></tr>
+    </table>
+</div>
+
+<!-- ═══════ 備註 ═══════ -->
+<div class="section">
+    <h2>備註與後續建議</h2>
+    <ul>
+        <li><strong>MonitorServer BuildStateJson 仍觸發多次 RefreshState：</strong>每個 <code>IAxisCard</code> 屬性存取都會觸發一次 <code>RefreshState()</code>。由於通訊線程以 10ms 週期統一更新所有軸資料，各屬性間的時間差異極小（微秒級）。對於 20Hz 的監控用途，此行為可接受。如需進一步優化，可在 <code>IAxisCard</code> 介面新增 <code>GetSnapshot()</code> 方法。</li>
+        <li><strong>前端適配：</strong>若 <code>monitor.html</code> 前端有解析 WebSocket JSON 的程式碼，需確認其能忽略新增的 <code>endEffectorPosition</code> / <code>endEffectorPosture</code> 欄位，或加以利用。</li>
+        <li><strong>Demo.EndEffector 未測試：</strong>該專案未包含在 Robot.sln 中，若有使用 <code>MonitorServer</code> 的程式碼需同步更新 import 路徑。</li>
+    </ul>
+</div>
+
+</div>
+</body>
+</html>

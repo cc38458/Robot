@@ -106,6 +106,9 @@ internal static class Program
         Console.ReadLine();
     }
 
+    /// <summary>
+    /// 執行單一展示步驟：顯示標題、執行動作、顯示結果，失敗時中止程式。
+    /// </summary>
     private static void RunStep(string title, Action action, bool waitAfter = true)
     {
         Console.WriteLine("====================================================");
@@ -132,6 +135,9 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// 輪詢等待所有軸進入 STOP 狀態，逾時後印出警告並繼續。
+    /// </summary>
     private static void WaitUntilAllAxisStop(RA605RobotApp robot, int timeoutSec)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();

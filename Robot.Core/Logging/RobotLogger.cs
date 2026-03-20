@@ -91,6 +91,9 @@ namespace Robot.Core.Logging
                 Warn($"[DLL] {apiName} → 錯誤碼 {retCode}{(extra.Length > 0 ? $" ({extra})" : "")}");
         }
 
+        /// <summary>
+        /// 將訊息加入寫入佇列（若等級低於最低設定則忽略）。
+        /// </summary>
         private void Log(LogLevel level, string message)
         {
             if (_disposed || level < _minLevel) return;
@@ -103,19 +106,29 @@ namespace Robot.Core.Logging
             _hasEntries.Set();
         }
 
+        /// <summary>
+        /// 背景寫入線程主迴圈：持續清空佇列並寫入檔案，直到 Dispose 被呼叫。
+        /// </summary>
         private void WriterLoop()
         {
             while (!_disposed)
             {
-                _hasEntries.Wait(TimeSpan.FromMilliseconds(500));
-                _hasEntries.Reset();
+                // 先清空佇列，再判斷是否需要等待
                 FlushQueue();
+                if (_queue.IsEmpty)
+                {
+                    _hasEntries.Wait(TimeSpan.FromMilliseconds(500));
+                }
+                _hasEntries.Reset();
             }
             // 最後清空
             FlushQueue();
             _currentWriter?.Dispose();
         }
 
+        /// <summary>
+        /// 將佇列中所有待寫入的日誌條目寫入檔案並刷新緩衝區。
+        /// </summary>
         private void FlushQueue()
         {
             while (_queue.TryDequeue(out var entry))
@@ -126,6 +139,9 @@ namespace Robot.Core.Logging
             _currentWriter?.Flush();
         }
 
+        /// <summary>
+        /// 確保 StreamWriter 已就緒且指向今日的日誌檔案（跨日自動切換）。
+        /// </summary>
         private void EnsureWriter()
         {
             var today = DateTime.Now.ToString("yyyy-MM-dd");
@@ -145,6 +161,9 @@ namespace Robot.Core.Logging
             _currentWriter.WriteLine($"══════════════════════════════════════════");
         }
 
+        /// <summary>
+        /// 釋放資源，喚醒寫入線程以完成最後的佇列清空。
+        /// </summary>
         public void Dispose()
         {
             if (_disposed) return;

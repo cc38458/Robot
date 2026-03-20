@@ -82,6 +82,9 @@ namespace Robot.Core.Models
         /// <summary>指令唯一識別碼</summary>
         public Guid Id { get; set; } = Guid.NewGuid();
 
+        /// <summary>
+        /// 回傳可讀的指令摘要字串，用於日誌與除錯。
+        /// </summary>
         public override string ToString()
         {
             return Type switch

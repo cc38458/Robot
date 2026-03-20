@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RA605 機械臂控制框架 — 技術審查報告</title>
+    <style>
+        :root {
+            --bg: #0d1117;
+            --surface: #161b22;
+            --border: #30363d;
+            --text: #e6edf3;
+            --text-muted: #8b949e;
+            --accent: #58a6ff;
+            --green: #3fb950;
+            --yellow: #d29922;
+            --red: #f85149;
+            --orange: #db6d28;
+            --purple: #bc8cff;
+            --code-bg: #1c2129;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans TC', Roboto, Helvetica, Arial, sans-serif;
+            line-height: 1.7;
+            padding: 0;
+        }
+        .header {
+            background: linear-gradient(135deg, #0d1117 0%, #1a1e2e 50%, #161b22 100%);
+            border-bottom: 1px solid var(--border);
+            padding: 60px 40px 40px;
+            text-align: center;
+        }
+        .header h1 {
+            font-size: 2.2em;
+            font-weight: 700;
+            color: var(--accent);
+            margin-bottom: 12px;
+            letter-spacing: -0.02em;
+        }
+        .header .subtitle {
+            color: var(--text-muted);
+            font-size: 1.1em;
+        }
+        .header .meta {
+            margin-top: 20px;
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            color: var(--text-muted);
+            font-size: 0.9em;
+        }
+        .header .meta span { display: flex; align-items: center; gap: 6px; }
+        .container { max-width: 1100px; margin: 0 auto; padding: 40px 40px 80px; }
+
+        /* TOC */
+        .toc {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 28px 32px;
+            margin-bottom: 40px;
+        }
+        .toc h2 { font-size: 1.1em; color: var(--accent); margin-bottom: 16px; }
+        .toc ol { padding-left: 24px; }
+        .toc li { margin: 6px 0; }
+        .toc a { color: var(--accent); text-decoration: none; }
+        .toc a:hover { text-decoration: underline; }
+
+        /* Sections */
+        .section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 32px;
+            margin-bottom: 28px;
+        }
+        .section h2 {
+            font-size: 1.4em;
+            font-weight: 600;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+            color: var(--text);
+        }
+        .section h3 {
+            font-size: 1.1em;
+            font-weight: 600;
+            margin: 24px 0 12px;
+            color: var(--purple);
+        }
+        p { margin-bottom: 12px; }
+
+        /* Severity badges */
+        .badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 0.78em;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+        .badge-critical { background: #f8514922; color: var(--red); border: 1px solid #f8514944; }
+        .badge-high { background: #db6d2822; color: var(--orange); border: 1px solid #db6d2844; }
+        .badge-medium { background: #d2992222; color: var(--yellow); border: 1px solid #d2992244; }
+        .badge-low { background: #3fb95022; color: var(--green); border: 1px solid #3fb95044; }
+        .badge-info { background: #58a6ff22; color: var(--accent); border: 1px solid #58a6ff44; }
+
+        /* Issue cards */
+        .issue {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 20px 24px;
+            margin: 16px 0;
+            border-left: 3px solid var(--border);
+        }
+        .issue.critical { border-left-color: var(--red); }
+        .issue.high { border-left-color: var(--orange); }
+        .issue.medium { border-left-color: var(--yellow); }
+        .issue.low { border-left-color: var(--green); }
+        .issue.info { border-left-color: var(--accent); }
+        .issue-title {
+            font-weight: 600;
+            font-size: 1.05em;
+            margin-bottom: 8px;
+        }
+        .issue-location {
+            color: var(--text-muted);
+            font-size: 0.85em;
+            margin-bottom: 8px;
+            font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+        }
+        .issue p { color: var(--text-muted); font-size: 0.95em; }
+
+        /* Code */
+        code {
+            background: var(--code-bg);
+            color: var(--accent);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+            font-size: 0.88em;
+        }
+        pre {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 16px 20px;
+            overflow-x: auto;
+            margin: 12px 0;
+            font-size: 0.88em;
+            line-height: 1.6;
+        }
+        pre code { background: transparent; padding: 0; color: var(--text); }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            font-size: 0.92em;
+        }
+        th {
+            background: var(--code-bg);
+            color: var(--accent);
+            text-align: left;
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            font-weight: 600;
+        }
+        td {
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+        }
+        tr:hover td { background: #1c2129; }
+
+        /* Stats grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 16px;
+            margin: 20px 0;
+        }
+        .stat-card {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+        }
+        .stat-card .stat-value {
+            font-size: 2em;
+            font-weight: 700;
+            color: var(--accent);
+        }
+        .stat-card .stat-label {
+            color: var(--text-muted);
+            font-size: 0.85em;
+            margin-top: 4px;
+        }
+
+        /* Arch diagram */
+        .arch-diagram {
+            background: var(--code-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 24px;
+            text-align: center;
+            margin: 16px 0;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.9em;
+            line-height: 1.8;
+            overflow-x: auto;
+            white-space: pre;
+            color: var(--text-muted);
+        }
+
+        /* Summary bar */
+        .summary-bar {
+            display: flex;
+            gap: 16px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        .summary-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.92em;
+        }
+        .summary-dot {
+            width: 10px; height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        /* Lists */
+        ul, ol { padding-left: 24px; margin: 8px 0; }
+        li { margin: 4px 0; color: var(--text-muted); }
+        li strong { color: var(--text); }
+
+        .highlight { color: var(--yellow); }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════ HEADER ═══════════════════════════════ -->
+<div class="header">
+    <h1>RA605 機械臂控制框架</h1>
+    <div class="subtitle">技術審查報告 — 邏輯問題分析與改善建議</div>
+    <div class="meta">
+        <span>2026-03-20</span>
+        <span>.NET 8 / C#</span>
+        <span>~3,700 行原始碼</span>
+    </div>
+</div>
+
+<div class="container">
+
+<!-- ═══════════════════════════════ TOC ═══════════════════════════════ -->
+<div class="toc">
+    <h2>目錄</h2>
+    <ol>
+        <li><a href="#overview">專案概述與架構評估</a></li>
+        <li><a href="#stats">問題統計摘要</a></li>
+        <li><a href="#critical">嚴重邏輯問題（需立即修正）</a></li>
+        <li><a href="#concurrency">執行緒安全與併發問題</a></li>
+        <li><a href="#architecture">架構耦合與設計問題</a></li>
+        <li><a href="#naming">命名規範與程式碼風格</a></li>
+        <li><a href="#quality">品質與可維護性</a></li>
+        <li><a href="#recommendations">改善建議總結</a></li>
+    </ol>
+</div>
+
+<!-- ═══════════════════════════════ 1. OVERVIEW ═══════════════════════════════ -->
+<div class="section" id="overview">
+    <h2>1. 專案概述與架構評估</h2>
+    <p>本專案為 RA605 六軸機械臂的高階控制框架，採用分層架構，支援 Real（EtherCAT 硬體）與 Mock（模擬）兩種後端模式，並提供唯讀 WebSocket 監控介面。</p>
+
+    <h3>架構分層</h3>
+    <div class="arch-diagram">
+┌──────────────────────────────────────────────────────┐
+│           Demo.StepConsole / 上位應用程式              │
+├──────────────────────────────────────────────────────┤
+│          Robot.Motion.RA605（高階運動控制）             │
+│   RA605RobotApp ← MotionController ← RA605Kinematics │
+├──────────────────────────────────────────────────────┤
+│          Robot.Driver.Delta（驅動層）                  │
+│   DeltaDriver ← CommThread ← IEtherCatApi            │
+│                  MonitorServer（WebSocket 監控）        │
+├──────────────────────────────────────────────────────┤
+│          Robot.Core（核心介面與模型）                   │
+│   IAxisCard / IMotionController / Enums / Models      │
+└──────────────────────────────────────────────────────┘
+    </div>
+
+    <h3>整體評價</h3>
+    <p>專案整體架構清晰，分層合理，介面設計良好。核心功能（EtherCAT 通訊、正逆運動學、PVT 軌跡規劃）的實作品質中上。以下是逐一檢查後發現的各類問題。</p>
+</div>
+
+<!-- ═══════════════════════════════ 2. STATS ═══════════════════════════════ -->
+<div class="section" id="stats">
+    <h2>2. 問題統計摘要</h2>
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-value" style="color: var(--red)">3</div>
+            <div class="stat-label">嚴重（潛在 Bug）</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color: var(--orange)">5</div>
+            <div class="stat-label">高風險（併發/安全）</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color: var(--yellow)">6</div>
+            <div class="stat-label">中等（架構/設計）</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" style="color: var(--green)">8</div>
+            <div class="stat-label">低（命名/風格）</div>
+        </div>
+    </div>
+    <div class="summary-bar">
+        <div class="summary-item"><span class="summary-dot" style="background:var(--red)"></span>嚴重：可能導致運行時錯誤或資料損壞</div>
+        <div class="summary-item"><span class="summary-dot" style="background:var(--orange)"></span>高風險：潛在死鎖、競態條件或安全問題</div>
+        <div class="summary-item"><span class="summary-dot" style="background:var(--yellow)"></span>中等：架構耦合或設計不良</div>
+        <div class="summary-item"><span class="summary-dot" style="background:var(--green)"></span>低：命名或風格不一致</div>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════ 3. CRITICAL ═══════════════════════════════ -->
+<div class="section" id="critical">
+    <h2>3. 嚴重邏輯問題（需立即修正）</h2>
+
+    <!-- Issue 3.1 -->
+    <div class="issue critical">
+        <div class="issue-title"><span class="badge badge-critical">嚴重</span>DoImmediateStopIfRequested 阻塞通訊線程</div>
+        <div class="issue-location">CommThread.cs:867-900</div>
+        <p>
+            <code>DoImmediateStopIfRequested()</code> 方法中包含 <code>Thread.Sleep(waitMs)</code>，
+            當某軸要求立即停止時，整條通訊線程會被阻塞 <code>tDec * 1000 + 50</code> 毫秒（預設約 550ms）。
+            在此期間：
+        </p>
+        <ul>
+            <li><strong>狀態輪詢完全中斷</strong> — 其他軸的位置、速度、警報無法更新</li>
+            <li><strong>緊急停止請求無法被處理</strong> — 若同時有其他軸觸發警報，通訊線程無法回應</li>
+            <li><strong>看門狗心跳停止更新</strong> — 可能觸發假看門狗超時</li>
+        </ul>
+        <p><strong>建議修正：</strong>將立即停止改為非阻塞式狀態機，在主迴圈每次迭代中推進狀態，而非使用 Thread.Sleep 等待。</p>
+<pre><code>// 建議：每軸使用停止狀態追蹤，而非阻塞等待
+enum StopPhase { None, Decelerating, WaitingSdStop }
+private readonly StopPhase[] _stopPhase = new StopPhase[AXIS_COUNT];
+private readonly long[] _stopStartTick = new long[AXIS_COUNT];
+
+// 在主迴圈中非阻塞式推進
+private void AdvanceImmediateStop(ushort axis) {
+    if (_stopPhase[axis] == StopPhase.Decelerating) {
+        var elapsed = (DateTime.UtcNow.Ticks - _stopStartTick[axis]) / TimeSpan.TicksPerMillisecond;
+        if (elapsed >= _immediateStopTDec[axis] * 1000 + 50) {
+            _ecat.CS_ECAT_Slave_Motion_Sd_Stop(...);
+            _stopPhase[axis] = StopPhase.None;
+        }
+    }
+}</code></pre>
+    </div>
+
+    <!-- Issue 3.2 -->
+    <div class="issue critical">
+        <div class="issue-title"><span class="badge badge-critical">嚴重</span>DoPollStatus 中 DLL 回傳值被靜默忽略</div>
+        <div class="issue-location">CommThread.cs:590-649</div>
+        <p>
+            <code>DoPollStatus()</code> 方法對每個軸連續呼叫 4 個 DLL 函式，但回傳碼 <code>ret</code> 被反覆覆寫而從未檢查：
+        </p>
+<pre><code>ret = _ecat.CS_ECAT_Slave_Motion_Get_Actual_Position(...);  // ret 未檢查
+ret = _ecat.CS_ECAT_Slave_Motion_Get_Current_Speed(...);    // 覆寫上一個 ret
+ret = _ecat.CS_ECAT_Slave_Motion_Get_Mdone(...);            // 再次覆寫
+ret = _ecat.CS_ECAT_Slave_Motion_Get_StatusWord(...);       // 最終 ret 也未使用</code></pre>
+        <p>
+            若任一 DLL 呼叫失敗（如硬體通訊中斷），系統會使用未更新的舊值或初始值（0）繼續運行，
+            可能導致位置讀數錯誤或遺漏警報偵測。在硬體實機上，這可能造成<strong>碰撞風險</strong>。
+        </p>
+        <p><strong>建議修正：</strong>檢查每個回傳碼，累計錯誤次數，連續失敗達到閾值時觸發安全停止。</p>
+    </div>
+
+    <!-- Issue 3.3 -->
+    <div class="issue critical">
+        <div class="issue-title"><span class="badge badge-critical">嚴重</span>MonitorServer.BuildStateJson 多次觸發 RefreshState 造成狀態不一致</div>
+        <div class="issue-location">MonitorServer.cs:239-256</div>
+        <p>
+            <code>BuildStateJson()</code> 在 20Hz 廣播時依序存取 <code>_driver.Pos</code>、<code>_driver.Speed</code>、
+            <code>_driver.State</code>、<code>_driver.QueueLength</code>、<code>_driver.AxisCardState</code>。
+            每次屬性存取都會觸發 <code>DeltaDriver.RefreshState()</code>，意味著：
+        </p>
+        <ul>
+            <li>每次廣播觸發 <strong>5 次 lock + 5 次狀態複製</strong>，效能浪費</li>
+            <li>pos 與 speed 可能來自<strong>不同時刻</strong>的快照，在快速運動中會出現 pos/speed 不匹配</li>
+            <li>廣播線程與主線程同時頻繁呼叫 RefreshState，造成不必要的鎖競爭</li>
+        </ul>
+        <p><strong>建議修正：</strong>新增一個一次性讀取全部狀態的方法，或在 BuildStateJson 中只呼叫一次 RefreshState 後使用快取值。</p>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════ 4. CONCURRENCY ═══════════════════════════════ -->
+<div class="section" id="concurrency">
+    <h2>4. 執行緒安全與併發問題</h2>
+
+    <!-- Issue 4.1 -->
+    <div class="issue high">
+        <div class="issue-title"><span class="badge badge-high">高風險</span>_queueLength 陣列跨鎖寫讀不一致</div>
+        <div class="issue-location">CommThread.cs:264-268 / CommThread.cs:102-111</div>
+        <p>
+            <code>UpdateQueueLengths()</code> 在 <code>_queueLock</code> 保護下寫入 <code>_queueLength[]</code>，
+            但 <code>GetState()</code> 在 <code>_stateLock</code> 保護下讀取同一陣列。
+            兩個不同的鎖保護同一資料的讀寫，可能讀到半更新的中間狀態。
+        </p>
+<pre><code>// 寫入端（受 _queueLock 保護）
+private void UpdateQueueLengths() {
+    for (int i = 0; i < AXIS_COUNT; i++)
+        _queueLength[i] = _queues[i].Count;  // ← 寫在 _queueLock 內
+}
+
+// 讀取端（受 _stateLock 保護）
+public void GetState(..., int[] queueLen) {
+    lock (_stateLock) {
+        Array.Copy(_queueLength, queueLen, AXIS_COUNT);  // ← 讀在 _stateLock 內
+    }
+}</code></pre>
+        <p><strong>建議修正：</strong>將 <code>_queueLength</code> 的更新也放入 <code>_stateLock</code> 內，或在 <code>GetState</code> 中同時取鎖。</p>
+    </div>
+
+    <!-- Issue 4.2 -->
+    <div class="issue high">
+        <div class="issue-title"><span class="badge badge-high">高風險</span>_cardState 跨線程讀寫的一致性風險</div>
+        <div class="issue-location">CommThread.cs:34-36 / CommThread.cs:950-958</div>
+        <p>
+            <code>_cardState</code> 宣告為 <code>volatile</code>，但 <code>ProcessCardStateChange()</code>
+            方法執行的是「先讀 flag → 寫 state → 清 flag」三步組合操作，並非原子性。
+            通訊線程可能在主線程讀取 <code>_cardStateChangeRequest</code> 之後、清除之前設定新的狀態請求，
+            導致該請求被遺失。
+        </p>
+<pre><code>// 非原子操作：通訊線程可能在步驟 1 和 3 之間寫入新的請求
+public CardState ProcessCardStateChange() {
+    if (_cardStateChangeRequest)          // 步驟 1：讀取 flag
+    {
+        _cardState = _requestedCardState; // 步驟 2：套用
+        _cardStateChangeRequest = false;  // 步驟 3：清除 ← 此時通訊線程可能已寫了新 request
+    }
+    return _cardState;
+}</code></pre>
+        <p><strong>建議修正：</strong>使用 <code>Interlocked.CompareExchange</code> 或加鎖確保原子性，或改用 ConcurrentQueue 傳遞狀態變更。</p>
+    </div>
+
+    <!-- Issue 4.3 -->
+    <div class="issue high">
+        <div class="issue-title"><span class="badge badge-high">高風險</span>ProcessQueues 與 DoPollStatus 的鎖取得順序不一致</div>
+        <div class="issue-location">CommThread.cs:682-728 / CommThread.cs:605-676</div>
+        <p>
+            雖然這兩個方法目前在同一條通訊線程上依序執行，不會真正死鎖，
+            但它們呈現經典的 <strong>ABBA 鎖順序</strong>，屬於潛在危險：
+        </p>
+        <table>
+            <tr>
+                <th>方法</th>
+                <th>鎖取得順序</th>
+            </tr>
+            <tr>
+                <td><code>ProcessQueues()</code></td>
+                <td><code>_queueLock</code> → <code>_stateLock</code></td>
+            </tr>
+            <tr>
+                <td><code>DoPollStatus()</code> → <code>CheckAutoSdStop()</code></td>
+                <td><code>_stateLock</code> → <code>_queueLock</code></td>
+            </tr>
+        </table>
+        <p>
+            若未來重構將任一方法移至不同線程（例如將狀態輪詢獨立出來），
+            <strong>將立即產生死鎖</strong>。建議統一鎖取得順序或重新設計鎖策略。
+        </p>
+    </div>
+
+    <!-- Issue 4.4 -->
+    <div class="issue high">
+        <div class="issue-title"><span class="badge badge-high">高風險</span>BroadcastLoop 使用 sync-over-async 反模式</div>
+        <div class="issue-location">MonitorServer.cs:219-220</div>
+        <p>
+            <code>ws.SendAsync(...).GetAwaiter().GetResult()</code> 在 Thread 上同步等待非同步操作。
+            當連線客戶端網路較慢或有多個客戶端時，單次廣播可能耗時數百毫秒，導致：
+        </p>
+        <ul>
+            <li>廣播頻率降低（無法維持 20Hz）</li>
+            <li>若某客戶端斷線但 socket 尚未關閉，SendAsync 可能長時間阻塞</li>
+        </ul>
+        <p><strong>建議修正：</strong>改為 <code>async</code> 廣播迴圈，或使用 <code>Task.WhenAll</code> 並行發送並加上超時取消。</p>
+    </div>
+
+    <!-- Issue 4.5 -->
+    <div class="issue high">
+        <div class="issue-title"><span class="badge badge-high">高風險</span>RobotLogger.WriterLoop 存在信號丟失窗口</div>
+        <div class="issue-location">RobotLogger.cs:106-117</div>
+        <p>
+            在 <code>WriterLoop</code> 中：
+        </p>
+<pre><code>_hasEntries.Wait(TimeSpan.FromMilliseconds(500)); // ← 收到信號返回
+_hasEntries.Reset();   // ← 此處與上一行之間，若另一線程 Enqueue + Set()
+FlushQueue();          //    該次 Set() 的信號被 Reset 清除，延遲最多 500ms</code></pre>
+        <p>
+            此問題不會造成日誌遺失，但在高頻寫入場景下，日誌可能出現最多 500ms 的延遲。
+            對於即時除錯場景（如追查碰撞原因），此延遲可能影響日誌時序分析。
+        </p>
+        <p><strong>建議修正：</strong>改用 <code>AutoResetEvent</code> 或 <code>BlockingCollection</code> 取代手動信號管理。</p>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════ 5. ARCHITECTURE ═══════════════════════════════ -->
+<div class="section" id="architecture">
+    <h2>5. 架構耦合與設計問題</h2>
+
+    <!-- Issue 5.1 -->
+    <div class="issue medium">
+        <div class="issue-title"><span class="badge badge-medium">中等</span>RA605RobotApp 直接依賴具體實作類別</div>
+        <div class="issue-location">RA605RobotApp.cs:18-19</div>
+        <p>
+            入口類別 <code>RA605RobotApp</code> 直接建立並持有 <code>DeltaDriver</code>（具體類）
+            與 <code>MotionController</code>（具體類），而非依賴 <code>IAxisCard</code> 與 <code>IMotionController</code> 介面。
+            這違反了<strong>依賴反轉原則（DIP）</strong>。
+        </p>
+<pre><code>// 目前
+private readonly DeltaDriver _driver;        // ← 具體類別
+private readonly MotionController _motion;   // ← 具體類別
+
+// 建議
+private readonly IAxisCard _driver;
+private readonly IMotionController _motion;</code></pre>
+        <p>
+            <strong>影響：</strong>無法在不修改 RA605RobotApp 的情況下替換驅動或運動控制實作，
+            也無法進行單元測試時注入 mock 物件。
+        </p>
+    </div>
+
+    <!-- Issue 5.2 -->
+    <div class="issue medium">
+        <div class="issue-title"><span class="badge badge-medium">中等</span>MotionCommand 為臃腫的「萬用」類別</div>
+        <div class="issue-location">MotionCommand.cs:1-100</div>
+        <p>
+            <code>MotionCommand</code> 使用單一類別搭配 nullable 欄位承載 7 種不同指令類型的資料。
+            不同指令實際使用的欄位不同，容易出現：
+        </p>
+        <ul>
+            <li>忘記填寫某類型專用欄位 → 運行時使用預設值 0，產生難以追蹤的邏輯錯誤</li>
+            <li>無法在編譯期確認指令資料的完整性</li>
+        </ul>
+        <table>
+            <tr>
+                <th>指令類型</th>
+                <th>實際使用欄位</th>
+                <th>未使用但存在的欄位</th>
+            </tr>
+            <tr>
+                <td>MoveAbsolute</td>
+                <td>Axis, Dist, StrVel, ConstVel, EndVel, TAcc, TDec</td>
+                <td>NewTargetSpd, TSec, DataCount, TargetPos, TargetTime, Multi*</td>
+            </tr>
+            <tr>
+                <td>VelocityChange</td>
+                <td>Axis, NewTargetSpd, TSec</td>
+                <td>Dist, StrVel, ConstVel, EndVel, TAcc, TDec, DataCount, Multi*</td>
+            </tr>
+            <tr>
+                <td>MultiAxisPVT</td>
+                <td>Multi*</td>
+                <td>Axis, Dist, StrVel, ConstVel, EndVel, TAcc, TDec, NewTargetSpd, TSec</td>
+            </tr>
+        </table>
+        <p><strong>建議修正：</strong>使用 <strong>record + discriminated union</strong> 模式，或至少使用工廠方法確保建構正確性。</p>
+    </div>
+
+    <!-- Issue 5.3 -->
+    <div class="issue medium">
+        <div class="issue-title"><span class="badge badge-medium">中等</span>MoveRelativeEndEffector 與 ContinuousMoveLoop 存在大量重複的旋轉矩陣建構程式碼</div>
+        <div class="issue-location">MotionController.cs:300-315 / MotionController.cs:428-453</div>
+        <p>
+            兩個方法中都包含完全相同的「從 Yaw/Pitch/Roll 增量建構旋轉矩陣並疊加到當前姿態」邏輯，
+            約 15 行程式碼完全重複。應提取為共用方法。
+        </p>
+<pre><code>// 重複出現的程式碼（兩處完全一致）
+var rotInc = Matrix4x4.CreateRotationZ(yawDeg * MathF.PI / 180f)
+           * Matrix4x4.CreateRotationY(pitchDeg * MathF.PI / 180f)
+           * Matrix4x4.CreateRotationX(rollDeg * MathF.PI / 180f);
+var curRot = new Matrix4x4(
+    currentPosture.M11, currentPosture.M12, currentPosture.M13, 0,
+    ...);
+var newRot = rotInc * curRot;
+// ... 手動抄寫 9 個矩陣元素 ...</code></pre>
+        <p><strong>建議修正：</strong>提取為 <code>ApplyRotationIncrement(Matrix4x4 current, float yawDeg, float pitchDeg, float rollDeg, float newX, float newY, float newZ)</code> 方法。</p>
+    </div>
+
+    <!-- Issue 5.4 -->
+    <div class="issue medium">
+        <div class="issue-title"><span class="badge badge-medium">中等</span>MonitorServer 位於 Driver 層但需要高階資訊</div>
+        <div class="issue-location">MonitorServer.cs / RA605RobotApp.cs:242</div>
+        <p>
+            <code>MonitorServer</code> 屬於 <code>Robot.Driver.Delta</code> 專案，但被 <code>RA605RobotApp</code>
+            建構時傳入 <code>_driver</code>（IAxisCard）。監控只能取得低階的軸角度資料，
+            無法取得末端位姿（EndEffectorPosition）等高階資訊，限制了監控功能的完整性。
+        </p>
+        <p><strong>建議修正：</strong>將 <code>MonitorServer</code> 移至 <code>Robot.Motion.RA605</code> 層，或定義一個 <code>IRobotStateProvider</code> 介面供監控使用。</p>
+    </div>
+
+    <!-- Issue 5.5 -->
+    <div class="issue medium">
+        <div class="issue-title"><span class="badge badge-medium">中等</span>缺乏運動參數驗證</div>
+        <div class="issue-location">DeltaDriver.cs / MotionController.cs</div>
+        <p>多數運動控制方法僅驗證軸卡狀態與軸號，但未驗證運動參數的合理性：</p>
+        <ul>
+            <li><strong>速度：</strong>未檢查是否為負值或超過硬體最大速度限制</li>
+            <li><strong>加減速時間：</strong><code>MoveAbsolute</code> 等方法未驗證 <code>tAcc</code>、<code>tDec</code> 是否 > 0</li>
+            <li><strong>角度範圍：</strong>軸空間運動未檢查目標角度是否在關節限位內（<code>RA605Kinematics</code> 中有限位定義但軸空間方法未使用）</li>
+            <li><strong>PVT 時間：</strong>未驗證 targetTime 陣列是否遞增</li>
+        </ul>
+        <p><strong>建議修正：</strong>在 <code>DeltaDriver</code> 或 <code>MotionController</code> 層加入參數範圍驗證，至少記錄警告。</p>
+    </div>
+
+    <!-- Issue 5.6 -->
+    <div class="issue medium">
+        <div class="issue-title"><span class="badge badge-medium">中等</span>缺乏單元測試專案</div>
+        <div class="issue-location">Robot.sln</div>
+        <p>
+            整個解決方案無任何測試專案。對於控制實體機械臂的軟體，至少以下部分應有單元測試覆蓋：
+        </p>
+        <ul>
+            <li><strong>RA605Kinematics</strong>：正逆運動學的精度驗證、奇異點處理、關節限位檢查</li>
+            <li><strong>MotionController</strong>：PVT 軌跡點產生的正確性、加速度限制邏輯</li>
+            <li><strong>CommThread 狀態機</strong>：各狀態轉移的正確性</li>
+            <li><strong>MotionCommand 建構</strong>：各類型指令的欄位完整性</li>
+        </ul>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════ 6. NAMING ═══════════════════════════════ -->
+<div class="section" id="naming">
+    <h2>6. 命名規範與程式碼風格</h2>
+
+    <!-- Issue 6.1 -->
+    <div class="issue low">
+        <div class="issue-title"><span class="badge badge-low">低</span>CardState.CONNCET 拼字錯誤</div>
+        <div class="issue-location">CardState.cs:14</div>
+        <p>
+            <code>CONNCET</code> 應為 <code>CONNECT</code>。此拼字錯誤貫穿整個程式碼庫（約 15 處引用），
+            雖然不影響功能，但會降低程式碼可讀性，且對外部開發者造成困惑。
+        </p>
+    </div>
+
+    <!-- Issue 6.2 -->
+    <div class="issue low">
+        <div class="issue-title"><span class="badge badge-low">低</span>持續移動速度變數命名過於簡短</div>
+        <div class="issue-location">MotionController.cs:32</div>
+        <p>
+            <code>_cdx</code>、<code>_cdy</code>、<code>_cdz</code>、<code>_cdYaw</code>、<code>_cdPitch</code>、<code>_cdRoll</code>
+            命名不直覺。建議改為更具描述性的名稱：
+        </p>
+<pre><code>// 目前
+private float _cdx, _cdy, _cdz, _cdYaw, _cdPitch, _cdRoll;
+
+// 建議
+private float _targetVelX, _targetVelY, _targetVelZ;
+private float _targetVelYaw, _targetVelPitch, _targetVelRoll;</code></pre>
+    </div>
+
+    <!-- Issue 6.3 -->
+    <div class="issue low">
+        <div class="issue-title"><span class="badge badge-low">低</span>Dist 參數名稱語意不明</div>
+        <div class="issue-location">IAxisCard.cs:105-106</div>
+        <p>
+            <code>MoveAbsolute</code> 的參數名為 <code>dist</code>，但對於絕對移動而言，此值代表「目標位置」而非「距離」。
+            建議 MoveAbsolute 使用 <code>targetPos</code>，MoveRelative 使用 <code>delta</code> 或 <code>distance</code>。
+        </p>
+    </div>
+
+    <!-- Issue 6.4 -->
+    <div class="issue low">
+        <div class="issue-title"><span class="badge badge-low">低</span>枚舉值使用全大寫命名</div>
+        <div class="issue-location">CardState.cs / MotorState.cs</div>
+        <p>
+            <code>CardState.NULL</code>、<code>MotorState.STOP</code> 等使用全大寫命名。
+            C# 慣例建議枚舉值使用 PascalCase（如 <code>CardState.Null</code>、<code>MotorState.Stop</code>）。
+            但考慮到此專案涉及硬體控制且全大寫在嵌入式領域常見，此為次要問題。
+        </p>
+    </div>
+
+    <!-- Issue 6.5 -->
+    <div class="issue low">
+        <div class="issue-title"><span class="badge badge-low">低</span>方法名稱 Initial() 不符慣例</div>
+        <div class="issue-location">IAxisCard.cs:58</div>
+        <p>
+            <code>Initial()</code> 應為 <code>Initialize()</code>。<code>Initial</code> 是形容詞，
+            <code>Initialize</code> 才是動詞。這在 <code>RA605RobotApp</code> 中已修正為 <code>Initialize()</code>，
+            但底層介面與實作仍為 <code>Initial()</code>，造成不一致。
+        </p>
+    </div>
+
+    <!-- Issue 6.6 -->
+    <div class="issue low">
+        <div class="issue-title"><span class="badge badge-low">低</span>Ralm / Estop 等縮寫缺乏文件說明</div>
+        <div class="issue-location">IAxisCard.cs:69-76</div>
+        <p>
+            <code>Ralm</code>（Reset Alarm）和 <code>Estop</code>（Emergency Stop）為領域縮寫，
+            對非硬體背景的開發者不直覺。建議至少在介面的 XML 文件中補充完整英文名稱。
+            或考慮更直覺的命名如 <code>EmergencyStop()</code>、<code>ResetAlarm()</code>。
+        </p>
+    </div>
+
+    <!-- Issue 6.7 -->
+    <div class="issue low">
+        <div class="issue-title"><span class="badge badge-low">低</span>Thread.Sleep 硬編碼散落各處</div>
+        <div class="issue-location">DeltaDriver.cs:124 / DeltaDriver.cs:163</div>
+        <p>
+            <code>DeltaDriver.End()</code> 中 <code>Thread.Sleep(500)</code> 和 <code>Ralm()</code> 中
+            <code>Thread.Sleep(200)</code> 為硬編碼魔術數字。建議提取為具名常數並記錄用途。
+        </p>
+    </div>
+
+    <!-- Issue 6.8 -->
+    <div class="issue low">
+        <div class="issue-title"><span class="badge badge-low">低</span>BATCH_PERIOD_SEC 計算公式難以理解</div>
+        <div class="issue-location">MotionController.cs:23</div>
+<pre><code>private const float BATCH_PERIOD_SEC = CONTINUOUS_CYCLE_MS * PVT_POINTS_PER_BATCH / 2 / 1000f;
+// = 50 * 10 / 2 / 1000 = 0.25 秒</code></pre>
+        <p>
+            為何除以 2？這個「半個批次週期」的物理意義未在註解中說明。
+            建議加上說明或拆解為更易讀的計算方式。
+        </p>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════ 7. QUALITY ═══════════════════════════════ -->
+<div class="section" id="quality">
+    <h2>7. 品質與可維護性</h2>
+
+    <div class="issue info">
+        <div class="issue-title"><span class="badge badge-info">資訊</span>RA605RobotApp.CalibrateZero 與 CommThread.RequestCalibrateZero 重複檢查 Mock 模式</div>
+        <div class="issue-location">RA605RobotApp.cs:218-226 / CommThread.cs:168-184</div>
+        <p>
+            Mock 模式的檢查在兩處都執行了：
+        </p>
+<pre><code>// RA605RobotApp.CalibrateZero()
+if (BackendMode == RobotBackendMode.Mock) { ... return true; }
+
+// CommThread.RequestCalibrateZero()
+if (_isMockBackend) { ... return true; }</code></pre>
+        <p>應統一在一處檢查，避免未來修改時遺漏其一。</p>
+    </div>
+
+    <div class="issue info">
+        <div class="issue-title"><span class="badge badge-info">資訊</span>Mock 後端的 Get_Actual_Position 映射不一致</div>
+        <div class="issue-location">EtherCatApiAdapter.cs:110</div>
+        <p>
+            <code>MockEtherCatApi.CS_ECAT_Slave_Motion_Get_Actual_Position</code> 委派至
+            <code>CEtherCAT_Mock.CS_ECAT_Slave_Motion_Get_Position</code>（非 <code>Get_Actual_Position</code>）。
+            雖然在 Mock 中兩者返回相同值，但映射不一致可能在未來擴展 Mock 功能時引起混淆。
+        </p>
+    </div>
+
+    <div class="issue info">
+        <div class="issue-title"><span class="badge badge-info">資訊</span>EtherCAT_DLL_Mock 使用 static 狀態，無法支援多實例</div>
+        <div class="issue-location">EtherCAT_DLL_Mock.cs:12-33</div>
+        <p>
+            <code>CEtherCAT_Mock</code> 所有狀態皆為 <code>static</code> 欄位。
+            若未來需要在同一進程中模擬多張軸卡或進行平行測試，靜態狀態會互相干擾。
+            此設計與 Real DLL（全域狀態的 P/Invoke）一致，因此對單機使用無影響，
+            但會限制自動化測試的平行執行。
+        </p>
+    </div>
+
+    <div class="issue info">
+        <div class="issue-title"><span class="badge badge-info">資訊</span>Dispose 模式不完整</div>
+        <div class="issue-location">DeltaDriver.cs:363-371 / RA605RobotApp.cs:284-296</div>
+        <p>
+            <code>DeltaDriver.Dispose()</code> 未呼叫 <code>End()</code>，可能在未正確關閉 EtherCAT 連線的情況下釋放資源。
+            而 <code>RA605RobotApp.Dispose()</code> 呼叫了 <code>_driver.End()</code> 再呼叫 <code>_driver.Dispose()</code>，
+            若使用者直接 Dispose DeltaDriver 而非 RA605RobotApp，Servo 可能不會被關閉。
+        </p>
+    </div>
+
+    <div class="issue info">
+        <div class="issue-title"><span class="badge badge-info">資訊</span>持續移動迴圈使用 volatile bool 而非 CancellationToken</div>
+        <div class="issue-location">MotionController.cs:30</div>
+        <p>
+            <code>_continuousRunning</code> 使用 <code>volatile bool</code> 控制線程生命週期，
+            但 .NET 推薦使用 <code>CancellationToken</code> 模式，可提供更好的取消傳播與異常處理。
+        </p>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════ 8. RECOMMENDATIONS ═══════════════════════════════ -->
+<div class="section" id="recommendations">
+    <h2>8. 改善建議總結</h2>
+
+    <h3>優先序一：立即修正（安全相關）</h3>
+    <table>
+        <tr>
+            <th>#</th>
+            <th>問題</th>
+            <th>影響</th>
+            <th>預估工作量</th>
+        </tr>
+        <tr>
+            <td>1</td>
+            <td>DoImmediateStopIfRequested 阻塞通訊線程</td>
+            <td>安全控制失效</td>
+            <td>中（需重構為非阻塞狀態機）</td>
+        </tr>
+        <tr>
+            <td>2</td>
+            <td>DoPollStatus 未檢查 DLL 回傳碼</td>
+            <td>硬體錯誤被忽略</td>
+            <td>小（加入 ret 檢查邏輯）</td>
+        </tr>
+        <tr>
+            <td>3</td>
+            <td>_queueLength 跨鎖不一致</td>
+            <td>讀到不一致的佇列長度</td>
+            <td>小（統一鎖策略）</td>
+        </tr>
+    </table>
+
+    <h3>優先序二：短期改善（穩定性）</h3>
+    <table>
+        <tr>
+            <th>#</th>
+            <th>問題</th>
+            <th>影響</th>
+            <th>預估工作量</th>
+        </tr>
+        <tr>
+            <td>4</td>
+            <td>MonitorServer.BuildStateJson 多次 RefreshState</td>
+            <td>效能浪費 + 狀態不一致</td>
+            <td>小</td>
+        </tr>
+        <tr>
+            <td>5</td>
+            <td>ProcessCardStateChange 非原子操作</td>
+            <td>狀態變更遺失</td>
+            <td>小</td>
+        </tr>
+        <tr>
+            <td>6</td>
+            <td>BroadcastLoop sync-over-async</td>
+            <td>廣播卡頓</td>
+            <td>小</td>
+        </tr>
+        <tr>
+            <td>7</td>
+            <td>加入運動參數驗證</td>
+            <td>防止非法指令下達</td>
+            <td>中</td>
+        </tr>
+        <tr>
+            <td>8</td>
+            <td>修正 CONNCET 拼字錯誤</td>
+            <td>程式碼可讀性</td>
+            <td>小（全域取代）</td>
+        </tr>
+    </table>
+
+    <h3>優先序三：中長期改善（架構）</h3>
+    <table>
+        <tr>
+            <th>#</th>
+            <th>問題</th>
+            <th>影響</th>
+            <th>預估工作量</th>
+        </tr>
+        <tr>
+            <td>9</td>
+            <td>RA605RobotApp 直接依賴具體實作</td>
+            <td>無法替換或測試</td>
+            <td>中（介面注入重構）</td>
+        </tr>
+        <tr>
+            <td>10</td>
+            <td>MotionCommand 萬用類別</td>
+            <td>類型安全性差</td>
+            <td>大（需重構指令系統）</td>
+        </tr>
+        <tr>
+            <td>11</td>
+            <td>建立單元測試專案</td>
+            <td>長期維護信心</td>
+            <td>大（持續投資）</td>
+        </tr>
+        <tr>
+            <td>12</td>
+            <td>MonitorServer 層級調整</td>
+            <td>監控功能完整性</td>
+            <td>中</td>
+        </tr>
+    </table>
+
+    <h3>程式碼品質亮點（值得保留的設計）</h3>
+    <ul>
+        <li><strong>通訊線程隔離：</strong>所有 EtherCAT DLL 呼叫嚴格限制在單一線程中，避免了 COM/native 庫的線程安全問題</li>
+        <li><strong>看門狗機制：</strong>主線程心跳 + 通訊線程存活檢查的雙向監控設計完善</li>
+        <li><strong>IEtherCatApi 抽象層：</strong>Real/Mock 後端的切換設計乾淨，不需條件編譯即可切換</li>
+        <li><strong>逆運動學的參考角選解：</strong>以 J4 偏差為首要判準避免手腕翻轉，設計考量到位</li>
+        <li><strong>PVT 速度連續性：</strong>批次間使用 prevBatchEndVel → strVel 確保軌跡速度連續</li>
+        <li><strong>奇異點檢測與診斷：</strong>IK 回傳 diagnostic 字串有助於除錯，奇異點警告閾值合理</li>
+        <li><strong>日誌系統：</strong>非同步寫入、日期分檔、線程 ID 記錄，功能完整且不阻塞主流程</li>
+        <li><strong>防禦性克隆：</strong>DeltaDriver 的 Pos、Speed 屬性返回 Clone 副本，避免外部修改影響內部狀態</li>
+    </ul>
+</div>
+
+</div>
+</body>
+</html>

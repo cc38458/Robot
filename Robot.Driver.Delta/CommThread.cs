@@ -45,6 +45,18 @@ namespace Robot.Driver.Delta
         private readonly double[] _immediateStopTDec = new double[AXIS_COUNT];
         private readonly object _immediateStopLock = new();
 
+        // ── 非阻塞式立即停止狀態機 ──
+        private enum StopPhase { None, Decelerating }
+        private readonly StopPhase[] _stopPhase = new StopPhase[AXIS_COUNT];
+        private readonly long[] _stopDeadlineTicks = new long[AXIS_COUNT];
+
+        // ── 輪詢錯誤計數（連續失敗觸發安全停止） ──
+        private const int POLL_ERROR_THRESHOLD = 5;
+        private readonly int[] _pollErrorCount = new int[AXIS_COUNT];
+
+        // ── 狀態變更鎖（保護 _cardStateChangeRequest/_requestedCardState 的原子性） ──
+        private readonly object _stateChangeLock = new();
+
         // ── 指令隊列（每軸獨立） ──
         private readonly Queue<MotionCommand>[] _queues = new Queue<MotionCommand>[AXIS_COUNT];
         private readonly object _queueLock = new();
@@ -82,6 +94,12 @@ namespace Robot.Driver.Delta
         // ── 零點設定檔路徑 ──
         private readonly string _zeroConfigPath;
 
+        /// <summary>
+        /// 建立通訊線程實例。
+        /// </summary>
+        /// <param name="logger">日誌記錄器。</param>
+        /// <param name="zeroConfigPath">零點設定檔路徑。</param>
+        /// <param name="useMockBackend">是否使用 Mock 後端。</param>
         public CommThread(RobotLogger logger, string zeroConfigPath = "axis_zero_config.json", bool useMockBackend = false)
         {
             _log = logger;
@@ -99,6 +117,9 @@ namespace Robot.Driver.Delta
         // 公開屬性（主線程讀取）
         // ════════════════════════════════════════
 
+        /// <summary>
+        /// 將通訊線程內部的軸狀態快照複製至呼叫端提供的陣列。
+        /// </summary>
         public void GetState(int[] pos, int[] speed, MotorState[] state, int[] queueLen)
         {
             lock (_stateLock)
@@ -110,6 +131,7 @@ namespace Robot.Driver.Delta
             }
         }
 
+        /// <summary>目前軸卡狀態（由通訊線程維護）。</summary>
         public CardState CardState => _cardState;
 
         /// <summary>主線程呼叫：更新心跳</summary>
@@ -129,6 +151,10 @@ namespace Robot.Driver.Delta
         // 連線/初始化/結束（由主線程呼叫，通訊線程執行）
         // ════════════════════════════════════════
 
+        /// <summary>
+        /// 啟動通訊線程並執行 EtherCAT 連線，阻塞至連線完成或逾時。
+        /// </summary>
+        /// <returns>連線成功回傳 true，否則 false。</returns>
         public bool StartConnection()
         {
             if (_running) return false;
@@ -149,6 +175,10 @@ namespace Robot.Driver.Delta
             return _connectResult;
         }
 
+        /// <summary>
+        /// 請求初始化所有軸（齒輪比、零點、Servo ON），阻塞至完成。
+        /// </summary>
+        /// <returns>初始化成功回傳 true，否則 false。</returns>
         public bool RequestInitial()
         {
             if (_cardState != CardState.CONNCET) return false;
@@ -158,6 +188,7 @@ namespace Robot.Driver.Delta
             return _initResult;
         }
 
+        /// <summary>請求結束通訊線程（Servo OFF 並關閉主站）。</summary>
         public void RequestEnd() => _endRequested = true;
 
         /// <summary>
@@ -187,6 +218,7 @@ namespace Robot.Driver.Delta
         // 安全指令（主線程呼叫，立即設旗標）
         // ════════════════════════════════════════
 
+        /// <summary>請求全軸緊急停止並清除所有隊列。</summary>
         public void RequestEstop()
         {
             _estopRequested = true;
@@ -194,6 +226,7 @@ namespace Robot.Driver.Delta
             _log.Warn("收到緊急停止請求");
         }
 
+        /// <summary>請求全軸警報復歸（Ralm + 重新 Servo ON）。</summary>
         public void RequestRalm()
         {
             _ralmRequested = true;
@@ -227,6 +260,11 @@ namespace Robot.Driver.Delta
         // 指令入隊（主線程呼叫）
         // ════════════════════════════════════════
 
+        /// <summary>
+        /// 將運動指令加入對應軸的隊列，由通訊線程依序消化。
+        /// </summary>
+        /// <param name="cmd">運動指令。</param>
+        /// <returns>入隊成功回傳 true，軸號無效回傳 false。</returns>
         public bool EnqueueCommand(MotionCommand cmd)
         {
             if (cmd.Axis >= AXIS_COUNT && cmd.Type != CommandType.MultiAxisPVT)
@@ -250,6 +288,7 @@ namespace Robot.Driver.Delta
             return true;
         }
 
+        /// <summary>清除所有軸的指令隊列。</summary>
         public void ClearAllQueues()
         {
             lock (_queueLock)
@@ -261,16 +300,27 @@ namespace Robot.Driver.Delta
             _log.Info("所有指令隊列已清除");
         }
 
+        /// <summary>
+        /// 更新各軸隊列長度快照（需在 _queueLock 內呼叫）。
+        /// </summary>
         private void UpdateQueueLengths()
         {
-            for (int i = 0; i < AXIS_COUNT; i++)
-                _queueLength[i] = _queues[i].Count;
+            // 在 _stateLock 下更新，確保 GetState() 讀取時一致
+            // 呼叫端已持有 _queueLock，鎖順序固定為 _queueLock → _stateLock
+            lock (_stateLock)
+            {
+                for (int i = 0; i < AXIS_COUNT; i++)
+                    _queueLength[i] = _queues[i].Count;
+            }
         }
 
         // ════════════════════════════════════════
         // 通訊線程主迴圈
         // ════════════════════════════════════════
 
+        /// <summary>
+        /// 通訊線程主迴圈：連線 → 輪詢/安全處理/隊列消化，直到收到結束請求。
+        /// </summary>
         private void CommLoop()
         {
             _log.Info("通訊線程啟動");
@@ -315,8 +365,8 @@ namespace Robot.Driver.Delta
                         _sdStopAllRequested = false;
                     }
 
-                    // ── 立即停止請求（每軸獨立） ──
-                    DoImmediateStopIfRequested();
+                    // ── 立即停止請求（每軸獨立，非阻塞狀態機） ──
+                    ProcessImmediateStops();
 
                     // ── 初始化請求 ──
                     if (_initRequested)
@@ -388,6 +438,9 @@ namespace Robot.Driver.Delta
         // 連線流程
         // ════════════════════════════════════════
 
+        /// <summary>
+        /// 執行 EtherCAT 主站連線流程：Open → GetCardSeq → Initial → 等待初始化完成。
+        /// </summary>
         private bool DoConnect()
         {
             ushort cardsNum = 0;
@@ -431,6 +484,9 @@ namespace Robot.Driver.Delta
         // 初始化流程
         // ════════════════════════════════════════
 
+        /// <summary>
+        /// 初始化各軸：載入零點設定、Servo ON、CSP 模式、齒輪比、虛擬座標。
+        /// </summary>
         private bool DoInitialize()
         {
             _log.Info("開始初始化軸...");
@@ -492,6 +548,9 @@ namespace Robot.Driver.Delta
             return true;
         }
 
+        /// <summary>
+        /// 從設定檔載入零點脈波數與齒輪比，檔案不存在或失敗時使用預設值。
+        /// </summary>
         private void LoadZeroConfig()
         {
             try
@@ -520,6 +579,9 @@ namespace Robot.Driver.Delta
             SaveZeroConfig([0,0,0,0,0,0]);
         }
 
+        /// <summary>
+        /// 將零點脈波數與齒輪比序列化並寫入設定檔。
+        /// </summary>
         private void SaveZeroConfig(int[] newPos)
         {
             try
@@ -587,64 +649,98 @@ namespace Robot.Driver.Delta
         // 狀態輪詢
         // ════════════════════════════════════════
 
+        /// <summary>
+        /// 輪詢各軸狀態（位置、速度、Mdone、StatusWord），逐項更新成功讀取的資料。
+        /// 連續失敗達閾值時觸發全軸安全停止。
+        /// </summary>
         private void DoPollStatus()
         {
             bool anyAlarm = false;
-            ushort ret;
+            bool[] needAutoSdStop = new bool[AXIS_COUNT];
 
             for (ushort i = 0; i < AXIS_COUNT; i++)
             {
                 int pos = 0, speed = 0;
                 ushort mdone = 0, statusWord = 0;
 
-                ret = _ecat.CS_ECAT_Slave_Motion_Get_Actual_Position(_cardNo, i, 0, ref pos);
-                ret = _ecat.CS_ECAT_Slave_Motion_Get_Current_Speed(_cardNo, i, 0, ref speed);
-                ret = _ecat.CS_ECAT_Slave_Motion_Get_Mdone(_cardNo, i, 0, ref mdone);
-                ret = _ecat.CS_ECAT_Slave_Motion_Get_StatusWord(_cardNo, i, 0, ref statusWord);
+                var r1 = _ecat.CS_ECAT_Slave_Motion_Get_Actual_Position(_cardNo, i, 0, ref pos);
+                var r2 = _ecat.CS_ECAT_Slave_Motion_Get_Current_Speed(_cardNo, i, 0, ref speed);
+                var r3 = _ecat.CS_ECAT_Slave_Motion_Get_Mdone(_cardNo, i, 0, ref mdone);
+                var r4 = _ecat.CS_ECAT_Slave_Motion_Get_StatusWord(_cardNo, i, 0, ref statusWord);
+
+                // 逐項檢查：只有成功讀取的項目才更新，失敗項保留上次值
+                int failCount = (r1 != 0 ? 1 : 0) + (r2 != 0 ? 1 : 0)
+                              + (r3 != 0 ? 1 : 0) + (r4 != 0 ? 1 : 0);
+
+                if (failCount > 0)
+                {
+                    _pollErrorCount[i]++;
+                    if (_pollErrorCount[i] == 1)
+                        _log.Warn($"軸 {i} 輪詢部分失敗 (ret={r1},{r2},{r3},{r4})");
+                    if (_pollErrorCount[i] >= POLL_ERROR_THRESHOLD)
+                    {
+                        _log.Error($"軸 {i} 連續 {_pollErrorCount[i]} 次輪詢含失敗，觸發全軸安全停止");
+                        _sdStopAllRequested = true;
+                        _pollErrorCount[i] = 0;
+                    }
+                }
+                else
+                {
+                    _pollErrorCount[i] = 0;
+                }
 
                 lock (_stateLock)
                 {
-                    // Mock 模式：pos 已是 mdeg，不需轉換
-                    // Real 模式：pos 是 encoder pulse，需 (pulse - zeroPulse) * 1000 / pulse2Ang
-                    _pos[i] = _isMockBackend ? pos : (int)(1000L * (pos - _zeroPulse[i]) / _pulse2Ang[i]);
-                    _speed[i] = speed;
+                    // 位置：僅在讀取成功時更新
+                    if (r1 == 0)
+                        _pos[i] = _isMockBackend ? pos : (int)(1000L * (pos - _zeroPulse[i]) / _pulse2Ang[i]);
 
-                    // 檢查警報（StatusWord Bit3）
-                    if ((statusWord & 0x0008) != 0)
+                    // 速度：僅在讀取成功時更新
+                    if (r2 == 0)
+                        _speed[i] = speed;
+
+                    // 狀態字：僅在讀取成功時檢查警報
+                    if (r4 == 0 && (statusWord & 0x0008) != 0)
                     {
                         if (_state[i] != MotorState.ALARM)
                             _log.Warn($"軸 {i} 觸發警報 (StatusWord=0x{statusWord:X4})");
                         _state[i] = MotorState.ALARM;
                         anyAlarm = true;
                     }
-                    else if (_state[i] == MotorState.ALARM)
+                    else if (r4 == 0 && _state[i] == MotorState.ALARM)
                     {
-                        // 警報已清除
                         _state[i] = MotorState.STOP;
                     }
-                    else if (_state[i] == MotorState.MOVING && mdone == 0)
+                    // Mdone：僅在讀取成功時判斷運動完成/開始
+                    else if (r3 == 0 && _state[i] == MotorState.MOVING && mdone == 0)
                     {
-                        // CSP 模式：Mdone==0 表示靜止
                         _state[i] = MotorState.STOP;
                         _log.Debug($"軸 {i} 運動完成,當前位置: {_pos[i]}");
-
-                        // 檢查是否為最後一個指令且 endVel != 0 → 自動 Sd_Stop
-                        CheckAutoSdStop(i);
+                        needAutoSdStop[i] = true; // 延遲到 _stateLock 外處理
                     }
-                    else if (_state[i] == MotorState.STOP && mdone != 0)
+                    else if (r3 == 0 && _state[i] == MotorState.STOP && mdone != 0)
                     {
                         _state[i] = MotorState.MOVING;
                     }
                 }
             }
 
-            // 任意軸警報 → 全軸急停
+            // CheckAutoSdStop 在 _stateLock 外呼叫，避免 _stateLock → _queueLock 的鎖順序問題
+            for (int i = 0; i < AXIS_COUNT; i++)
+            {
+                if (needAutoSdStop[i])
+                    CheckAutoSdStop(i);
+            }
+
             if (anyAlarm && _cardState == CardState.READY)
             {
                 _log.Error("偵測到軸警報，執行全軸緊急停止");
                 DoEstop();
-                _requestedCardState = CardState.ALARM;
-                _cardStateChangeRequest = true;
+                lock (_stateChangeLock)
+                {
+                    _requestedCardState = CardState.ALARM;
+                    _cardStateChangeRequest = true;
+                }
             }
         }
 
@@ -679,6 +775,9 @@ namespace Robot.Driver.Delta
         // 指令隊列處理
         // ════════════════════════════════════════
 
+        /// <summary>
+        /// 消化各軸指令隊列：檢查硬體 buffer 餘量後依序執行隊首指令。
+        /// </summary>
         private void ProcessQueues()
         {
             lock (_queueLock)
@@ -727,6 +826,9 @@ namespace Robot.Driver.Delta
             }
         }
 
+        /// <summary>
+        /// 透過 EtherCAT DLL 執行單一運動指令（絕對/相對/PV/PVT/停止/變速）。
+        /// </summary>
         private void ExecuteCommand(MotionCommand cmd)
         {
             ushort ret;
@@ -789,6 +891,9 @@ namespace Robot.Driver.Delta
             }
         }
 
+        /// <summary>
+        /// 執行多軸同步 PVT 指令：逐軸設定 Config 後呼叫 Sync_Move 同步啟動。
+        /// </summary>
         private void ExecuteMultiAxisPVT(MotionCommand cmd)
         {
             if (cmd.MultiTargetPos == null || cmd.MultiTargetTime == null ||
@@ -833,6 +938,7 @@ namespace Robot.Driver.Delta
         // 安全操作
         // ════════════════════════════════════════
 
+        /// <summary>清除隊列並對所有軸發送緊急停止命令。</summary>
         private void DoEstop()
         {
             _log.Warn("執行全軸緊急停止");
@@ -849,6 +955,7 @@ namespace Robot.Driver.Delta
             }
         }
 
+        /// <summary>清除隊列並對所有軸發送減速停止命令（看門狗觸發時使用）。</summary>
         private void DoSdStopAll()
         {
             _log.Warn("執行全軸減速停止（看門狗觸發）");
@@ -861,44 +968,52 @@ namespace Robot.Driver.Delta
         }
 
         /// <summary>
-        /// 處理各軸立即停止請求：VelocityChange(0, tDec) → 等待 tDec → Sd_Stop
-        /// 此操作在通訊線程中執行，會阻塞 tDec 秒（等待減速完成）
+        /// 非阻塞式處理各軸立即停止請求。
+        /// 每次主迴圈迭代呼叫一次，以狀態機方式推進：
+        ///   新請求 → VelocityChange(0, tDec) → 等待 deadline → Sd_Stop
+        /// 不使用 Thread.Sleep，確保通訊線程不被阻塞。
         /// </summary>
-        private void DoImmediateStopIfRequested()
+        private void ProcessImmediateStops()
         {
             for (ushort i = 0; i < AXIS_COUNT; i++)
             {
-                bool requested = false;
+                // 1. 檢查新的停止請求
+                bool newRequest = false;
                 double tDec = 0;
 
                 lock (_immediateStopLock)
                 {
                     if (_immediateStopRequested[i])
                     {
-                        requested = true;
+                        newRequest = true;
                         tDec = _immediateStopTDec[i];
                         _immediateStopRequested[i] = false;
                     }
                 }
 
-                if (!requested) continue;
+                if (newRequest)
+                {
+                    _log.Info($"軸 {i} 立即停止：發送 VelocityChange(0, {tDec}s)");
+                    var ret = _ecat.CS_ECAT_Slave_CSP_Velocity_Change(_cardNo, i, 0, 0, tDec);
+                    _log.DllReturn("CSP_Velocity_Change", ret, $"軸{i} → 0 mdeg/s, {tDec}s");
+                    _stopPhase[i] = StopPhase.Decelerating;
+                    _stopDeadlineTicks[i] = DateTime.UtcNow.Ticks
+                        + (long)((tDec + 0.05) * TimeSpan.TicksPerSecond);
+                    continue;
+                }
 
-                _log.Info($"軸 {i} 立即停止：VelocityChange(0, {tDec}s) → 等待 → Sd_Stop");
-
-                // Step 1: 變速至 0
-                var ret = _ecat.CS_ECAT_Slave_CSP_Velocity_Change(_cardNo, i, 0, 0, tDec);
-                _log.DllReturn("CSP_Velocity_Change", ret, $"軸{i} → 0 mdeg/s, {tDec}s");
-
-                // Step 2: 等待減速完成
-                int waitMs = (int)(tDec * 1000) + 50; // 多等 50ms 確保完成
-                Thread.Sleep(waitMs);
-
-                // Step 3: Sd_Stop 確保完全停止
-                ret = _ecat.CS_ECAT_Slave_Motion_Sd_Stop(_cardNo, i, 0, 0.05);
-                _log.DllReturn("Sd_Stop", ret, $"軸{i} (立即停止最終確認)");
+                // 2. 推進既有的減速狀態
+                if (_stopPhase[i] == StopPhase.Decelerating
+                    && DateTime.UtcNow.Ticks >= _stopDeadlineTicks[i])
+                {
+                    var ret = _ecat.CS_ECAT_Slave_Motion_Sd_Stop(_cardNo, i, 0, 0.05);
+                    _log.DllReturn("Sd_Stop", ret, $"軸{i} (立即停止最終確認)");
+                    _stopPhase[i] = StopPhase.None;
+                }
             }
         }
 
+        /// <summary>對所有軸執行警報復歸（Ralm）並重新 Servo ON。</summary>
         private void DoRalm()
         {
             _log.Info("執行全軸警報復歸");
@@ -911,10 +1026,14 @@ namespace Robot.Driver.Delta
                 ret = _ecat.CS_ECAT_Slave_Motion_Set_Svon(_cardNo, i, 0, 1);
                 _log.DllReturn("Set_Svon", ret, $"軸{i} ON");
             }
-            _requestedCardState = CardState.READY;
-            _cardStateChangeRequest = true;
+            lock (_stateChangeLock)
+            {
+                _requestedCardState = CardState.READY;
+                _cardStateChangeRequest = true;
+            }
         }
 
+        /// <summary>Servo OFF 所有軸並關閉 EtherCAT 主站。</summary>
         private void DoEnd()
         {
             _log.Info("開始關閉程序...");
@@ -934,6 +1053,7 @@ namespace Robot.Driver.Delta
         // 看門狗
         // ════════════════════════════════════════
 
+        /// <summary>檢查主線程心跳是否逾時，逾時則觸發全軸減速停止。</summary>
         private void CheckMainThreadWatchdog()
         {
             var elapsed = DateTime.UtcNow.Ticks - Interlocked.Read(ref _mainThreadHeartbeat);
@@ -941,24 +1061,31 @@ namespace Robot.Driver.Delta
             {
                 _log.Fatal($"主線程心跳逾時！已超過 {WATCHDOG_TIMEOUT_SEC} 秒未更新");
                 _sdStopAllRequested = true;
-                _requestedCardState = CardState.ALARM;
-                _cardStateChangeRequest = true;
+                lock (_stateChangeLock)
+                {
+                    _requestedCardState = CardState.ALARM;
+                    _cardStateChangeRequest = true;
+                }
             }
         }
 
         /// <summary>由主線程定期呼叫，處理通訊線程建議的狀態變更</summary>
         public CardState ProcessCardStateChange()
         {
-            if (_cardStateChangeRequest)
+            lock (_stateChangeLock)
             {
-                _cardState = _requestedCardState;
-                _cardStateChangeRequest = false;
+                if (_cardStateChangeRequest)
+                {
+                    _cardState = _requestedCardState;
+                    _cardStateChangeRequest = false;
+                }
             }
             return _cardState;
         }
 
         // ════════════════════════════════════════
 
+        /// <summary>釋放資源並等待通訊線程結束。</summary>
         public void Dispose()
         {
             _running = false;

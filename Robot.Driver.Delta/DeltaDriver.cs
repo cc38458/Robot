@@ -51,6 +51,7 @@ namespace Robot.Driver.Delta
         public CardState AxisCardState { get { RefreshState(); return _cardState; } }
         public int[] QueueLength { get { RefreshState(); return (int[])_queueLength.Clone(); } }
 
+        /// <summary>從 CommThread 取得最新的軸狀態快照並更新本地快取。</summary>
         private void RefreshState()
         {
             _comm.GetState(_pos, _speed, _state, _queueLength);
@@ -333,6 +334,7 @@ namespace Robot.Driver.Delta
         // 內部
         // ════════════════════════════════════════
 
+        /// <summary>驗證運動前置條件：軸卡需在 READY 狀態且軸號合法。</summary>
         private bool ValidateMotionPrecondition(ushort axis)
         {
             RefreshState();
@@ -349,6 +351,7 @@ namespace Robot.Driver.Delta
             return true;
         }
 
+        /// <summary>心跳計時器回呼：更新主線程心跳並檢查通訊線程存活狀態。</summary>
         private void HeartbeatCallback(object? state)
         {
             if (_disposed) return;
@@ -360,6 +363,7 @@ namespace Robot.Driver.Delta
             RefreshState();
         }
 
+        /// <summary>釋放心跳計時器與通訊線程資源。</summary>
         public void Dispose()
         {
             if (_disposed) return;

@@ -21,14 +21,22 @@ namespace Robot.Motion.RA605
         private MonitorServer? _monitor;
         private bool _disposed;
 
+        /// <summary>目前後端模式（Real 或 Mock）。</summary>
         public RobotBackendMode BackendMode { get; }
 
+        /// <summary>軸卡狀態。</summary>
         public CardState AxisCardState => _driver.AxisCardState;
+        /// <summary>各軸目前位置（mdeg）。</summary>
         public int[] Pos => _driver.Pos;
+        /// <summary>各軸目前速度（mdeg/s）。</summary>
         public int[] Speed => _driver.Speed;
+        /// <summary>各軸馬達狀態。</summary>
         public MotorState[] MotorState => _driver.State;
+        /// <summary>各軸指令隊列長度。</summary>
         public int[] QueueLength => _driver.QueueLength;
+        /// <summary>末端執行器位置 [X,Y,Z]（mm）。</summary>
         public float[] EndEffectorPosition => _motion.EndEffectorPosition;
+        /// <summary>末端執行器姿態齊次矩陣。</summary>
         public Matrix4x4 EndEffectorPosture => _motion.EndEffectorPosture;
 
         /// <summary>
@@ -239,22 +247,20 @@ namespace Robot.Motion.RA605
                 return $"http://localhost:{port}";
 
             string? resolved = htmlPath ?? FindDefaultMonitorHtmlPath();
-            _monitor = new MonitorServer(_driver, _log, port, resolved);
+            _monitor = new MonitorServer(_motion, _log, port, resolved);
             _monitor.Start();
 
             return $"http://localhost:{port}";
         }
 
+        /// <summary>停止 Web 監控伺服器並釋放相關資源。</summary>
         public void StopWebMonitor()
         {
             _monitor?.Dispose();
             _monitor = null;
         }
 
-        /// <summary>
-        /// 依常見路徑尋找 monitor.html。
-        /// </summary>
-        /// <returns>找到則回傳完整路徑，否則回傳 null。</returns>
+        /// <summary>依常見路徑尋找 monitor.html，找到回傳完整路徑，否則 null。</summary>
         private static string? FindDefaultMonitorHtmlPath()
         {
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -278,9 +284,7 @@ namespace Robot.Motion.RA605
             return null;
         }
 
-        /// <summary>
-        /// 釋放所有資源，並嘗試安全關閉監控與驅動。
-        /// </summary>
+        /// <summary>釋放所有資源，並嘗試安全關閉監控與驅動。</summary>
         public void Dispose()
         {
             if (_disposed) return;
