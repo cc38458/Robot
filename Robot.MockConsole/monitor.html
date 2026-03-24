@@ -393,7 +393,7 @@ function _tr(x,y,z){return new Float64Array([1,0,0,0, 0,1,0,0, 0,0,1,0, x,y,z,1]
 
 function fkRA605(angDeg){
   const R90=Math.PI/2;
-  const a=angDeg.map(d=>d*Math.PI/180);
+  const a=angDeg.map(d=>-d*Math.PI/180); // 馬達值為 -θ，需還原
   const m1=_mmul(_mmul(_rx(R90),_tr(FK_A1,0,FK_D1)),_rz(-a[0]));
   const m2=_mmul(_tr(FK_A2,0,0),_rz(-(a[1]-R90)));
   const m3=_mmul(_mmul(_tr(FK_A3X,0,FK_A3Z),_rx(R90)),_rz(-a[2]));

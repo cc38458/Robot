@@ -85,7 +85,7 @@ namespace Robot.Motion.RA605
         {
             float[] deg = new float[6];
             for (int i = 0; i < 6; i++)
-                deg[i] = anglesMdeg[i] / 1000f;
+                deg[i] = -anglesMdeg[i] / 1000f; // 馬達儲存值為 IK 反號後的 -θ，需還原
             return Forward(deg);
         }
 

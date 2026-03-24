@@ -58,11 +58,11 @@ internal static class Program
         RunStep("4) 第一軸移動到 30 度", () =>
         {
             bool ok = robot.MoveAxisAbsolute(axis: 0, angleMdeg: 10000, constVel: 30000);
-            ok = robot.MoveAxisAbsolute(axis: 1, angleMdeg: 0, constVel: 30000);
-            ok = robot.MoveAxisAbsolute(axis: 2, angleMdeg: 0, constVel: 30000);
-            ok = robot.MoveAxisAbsolute(axis: 3, angleMdeg: 0, constVel: 30000);
-            ok = robot.MoveAxisAbsolute(axis: 4, angleMdeg: 00, constVel: 30000);
-            ok = robot.MoveAxisAbsolute(axis: 5, angleMdeg: 0, constVel: 30000);
+            ok = robot.MoveAxisAbsolute(axis: 1, angleMdeg: 10000, constVel: 30000);
+            ok = robot.MoveAxisAbsolute(axis: 2, angleMdeg: 10000, constVel: 30000);
+            ok = robot.MoveAxisAbsolute(axis: 3, angleMdeg: 10000, constVel: 30000);
+            ok = robot.MoveAxisAbsolute(axis: 4, angleMdeg: 10000, constVel: 30000);
+            ok = robot.MoveAxisAbsolute(axis: 5, angleMdeg: 10000, constVel: 30000);
             if (!ok) throw new InvalidOperationException("J1 移動命令送出失敗");
             Console.WriteLine("J1 移動命令已送出（30°）。");
             WaitUntilAllAxisStop(robot, 20);
