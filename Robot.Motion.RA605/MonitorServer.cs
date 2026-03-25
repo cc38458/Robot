@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.WebSockets;
-using System.Numerics;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -30,6 +29,7 @@ namespace Robot.Motion.RA605
         private readonly List<WebSocket> _clients = new();
         private readonly object _clientLock = new();
         private Task? _broadcastTask;
+        private Task? _acceptTask;
         private bool _disposed;
 
         private const int BROADCAST_INTERVAL_MS = 50; // 20Hz
@@ -71,7 +71,7 @@ namespace Robot.Motion.RA605
             _log.Info($"監控伺服器啟動：http://localhost:{_port}/");
             _log.Info("Web 監控為唯讀模式（不接受控制命令）");
 
-            Task.Run(() => AcceptLoop(_cts.Token));
+            _acceptTask = Task.Run(() => AcceptLoop(_cts.Token));
             _broadcastTask = Task.Run(() => BroadcastLoopAsync());
         }
 
@@ -117,7 +117,7 @@ namespace Robot.Motion.RA605
             string? filePath = baseDir != null ? Path.Combine(baseDir, relativePath) : null;
 
             if (filePath != null && baseDir != null &&
-                Path.GetFullPath(filePath).StartsWith(Path.GetFullPath(baseDir)) &&
+                Path.GetFullPath(filePath).StartsWith(Path.GetFullPath(baseDir), StringComparison.OrdinalIgnoreCase) &&
                 File.Exists(filePath))
             {
                 ServeBytes(resp, File.ReadAllBytes(filePath), GetContentType(filePath));
@@ -126,7 +126,7 @@ namespace Robot.Motion.RA605
 
             // 嘗試 2：從 DLL 嵌入式資源提供
             var resourceName = reqPath.TrimStart('/');
-            var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName);
+            var stream = GetEmbeddedResource(resourceName);
             if (stream != null)
             {
                 using (stream)
@@ -161,6 +161,14 @@ namespace Robot.Motion.RA605
             resp.StatusCode = 200;
             resp.OutputStream.Write(data, 0, data.Length);
             resp.OutputStream.Close();
+        }
+
+        /// <summary>查詢嵌入式資源，先以短名稱查，備援以命名空間前綴查。</summary>
+        private static Stream? GetEmbeddedResource(string name)
+        {
+            var asm = Assembly.GetExecutingAssembly();
+            return asm.GetManifestResourceStream(name)
+                ?? asm.GetManifestResourceStream($"Robot.Motion.RA605.{name}");
         }
 
         /// <summary>依副檔名回傳對應的 MIME Content-Type。</summary>
@@ -257,8 +265,9 @@ namespace Robot.Motion.RA605
                 timeoutCts.CancelAfter(SEND_TIMEOUT_MS);
                 await ws.SendAsync(data, WebSocketMessageType.Text, true, timeoutCts.Token);
             }
-            catch
+            catch (Exception ex)
             {
+                _log.Warn($"WebSocket 發送失敗，移除客戶端：{ex.Message}");
                 lock (_clientLock) { _clients.Remove(ws); }
             }
         }
@@ -304,21 +313,36 @@ namespace Robot.Motion.RA605
         /// <summary>停止廣播、關閉所有 WebSocket 客戶端並釋放 HTTP 監聽器。</summary>
         public void Dispose()
         {
+            Dispose(disposing: true);
+            GC.SuppressFinalize(this);
+        }
+
+        /// <summary>實際釋放資源的核心方法。</summary>
+        protected virtual void Dispose(bool disposing)
+        {
             if (_disposed) return;
             _disposed = true;
-            _cts.Cancel();
-            _broadcastTask?.Wait(2000);
 
-            lock (_clientLock)
+            if (disposing)
             {
-                foreach (var ws in _clients)
-                    try { ws.Dispose(); } catch { }
-                _clients.Clear();
-            }
+                _cts.Cancel();
 
-            _listener?.Stop();
-            _listener?.Close();
-            _cts.Dispose();
+                var tasksToWait = new[] { _broadcastTask, _acceptTask }
+                    .Where(t => t != null).Cast<Task>().ToArray();
+                if (tasksToWait.Length > 0)
+                    Task.WaitAll(tasksToWait, 2000);
+
+                lock (_clientLock)
+                {
+                    foreach (var ws in _clients)
+                        try { ws.Dispose(); } catch { }
+                    _clients.Clear();
+                }
+
+                _listener?.Stop();
+                _listener?.Close();
+                _cts.Dispose();
+            }
         }
     }
 }

@@ -192,7 +192,7 @@ namespace Robot.Driver.Delta
         /// <inheritdoc />
         public ushort CS_ECAT_Slave_Motion_Get_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Get_Position(CardNo, NodeID, SlotNo, ref Position);
         /// <inheritdoc />
-        public ushort CS_ECAT_Slave_Motion_Get_Actual_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Get_Position(CardNo, NodeID, SlotNo, ref Position);
+        public ushort CS_ECAT_Slave_Motion_Get_Actual_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Get_Actual_Position(CardNo, NodeID, SlotNo, ref Position);
         /// <inheritdoc />
         public ushort CS_ECAT_Slave_Motion_Get_Current_Speed(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Speed) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Get_Current_Speed(CardNo, NodeID, SlotNo, ref Speed);
         /// <inheritdoc />
