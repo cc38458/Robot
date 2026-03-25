@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Configurations>Debug;Release;Mock</Configurations>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Robot.CommService</RootNamespace>
+    <AssemblyName>Robot.CommService</AssemblyName>
+    <Description>獨立行程 EtherCAT 通訊服務 — 透過命名管道接收指令，共享記憶體推送狀態</Description>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Mock' Or '$(UseMock)' == 'true'">
+    <DefineConstants>$(DefineConstants);MOCK</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Robot.Core\Robot.Core.csproj" />
+    <ProjectReference Include="..\Robot.Driver.Delta\Robot.Driver.Delta.csproj" />
+  </ItemGroup>
+
+</Project>
