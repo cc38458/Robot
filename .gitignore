@@ -4,6 +4,8 @@ obj/
 
 # Visual Studio
 .vs/
+*.user
+*.suo
 
 # Runtime logs
 logs/
@@ -15,6 +17,18 @@ RA605_Technical_Report.txt
 axis_zero_config.json
 提交紀錄.txt
 
-# User-specific
-*.user
-*.suo
+# ── 與專案無關的目錄 ──
+# Claude Code 本地設定
+.claude/
+
+# 非核心 Demo / 工具
+Demo.EndEffector/
+Robot.Test.MockVerification/
+CommService/
+
+# 自動產生的報告
+docs/
+
+# 其他
+NuGet.Config
+.gitattributes
