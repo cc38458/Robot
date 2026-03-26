@@ -38,6 +38,18 @@ namespace Robot.Motion.RA605
         // 前一批次 PVT 的末速度（mdeg/s），作為下批次的 strVel，確保批次銜接速度連續
         private readonly int[] _prevBatchEndVel = new int[AXIS_COUNT];
 
+        // ── 命令位置追蹤 ──
+        // 記錄最後一次運動指令的目標角度（mdeg），用於末端相對移動的基準計算
+        // null 表示尚未初始化，需從編碼器讀取
+        private int[]? _lastCommandedAngles;
+        // 命令位置是否可靠：PV 持續運動中或急停後為 false（目標位置未知）
+        private volatile bool _positionReliable = true;
+        private readonly object _cmdPosLock = new();
+
+        // ── PV 軸追蹤 ──
+        // 記錄哪些軸正處於 PV（等速持續）模式
+        private readonly bool[] _pvActive = new bool[AXIS_COUNT];
+
         /// <summary>底層軸卡驅動介面。</summary>
         public IAxisCard AxisCard { get; }
 
@@ -76,6 +88,83 @@ namespace Robot.Motion.RA605
             AxisCard = axisCard;
             _log = logger;
             _kin = new RA605Kinematics(toolLength);
+        }
+
+        // ════════════════════════════════════════
+        // 命令位置管理
+        // ════════════════════════════════════════
+
+        /// <summary>
+        /// 將命令位置同步為編碼器實際位置。
+        /// 適用時機：急停後、PV 停止後、手臂靜止時校正漂移。
+        /// </summary>
+        private void SyncCommandedPosition()
+        {
+            var actual = AxisCard.Pos;
+            lock (_cmdPosLock)
+            {
+                _lastCommandedAngles = (int[])actual.Clone();
+                _positionReliable = true;
+            }
+            _log.Info($"命令位置已同步至編碼器：[{string.Join(", ", actual.Select(a => $"{a / 1000f:F2}°"))}]");
+        }
+
+        /// <summary>
+        /// 標記命令位置不可靠（PV 啟動、急停等場景）。
+        /// </summary>
+        private void MarkPositionUnreliable()
+        {
+            _positionReliable = false;
+            _log.Warn("命令位置標記為不可靠（需同步後才能安全執行末端相對移動）");
+        }
+
+        /// <summary>更新命令位置為指定目標角度（運動指令成功送出後呼叫）。</summary>
+        private void UpdateCommandedAngles(int[] targetMdeg)
+        {
+            lock (_cmdPosLock)
+            {
+                _lastCommandedAngles = (int[])targetMdeg.Clone();
+                _positionReliable = true;
+            }
+        }
+
+        /// <summary>更新命令位置的單一軸（單軸運動指令成功送出後呼叫）。</summary>
+        private void UpdateCommandedAxis(ushort axis, int targetMdeg)
+        {
+            lock (_cmdPosLock)
+            {
+                // 若尚未初始化，先從編碼器讀取所有軸
+                _lastCommandedAngles ??= (int[])AxisCard.Pos.Clone();
+                _lastCommandedAngles[axis] = targetMdeg;
+                // 僅更新單軸時，若其他軸正在 PV 仍不可靠
+            }
+        }
+
+        /// <summary>取得命令位置作為相對移動基準。若不可靠則自動同步並發出警告。</summary>
+        private int[] GetCommandedBasePosition()
+        {
+            lock (_cmdPosLock)
+            {
+                if (_lastCommandedAngles == null)
+                {
+                    // 首次使用：從編碼器初始化
+                    _lastCommandedAngles = (int[])AxisCard.Pos.Clone();
+                    _positionReliable = true;
+                    _log.Info("命令位置首次初始化（從編碼器讀取）");
+                    return (int[])_lastCommandedAngles.Clone();
+                }
+
+                if (!_positionReliable)
+                {
+                    // 位置不可靠（PV中、急停後等），強制同步
+                    _lastCommandedAngles = (int[])AxisCard.Pos.Clone();
+                    _positionReliable = true;
+                    _log.Warn("命令位置不可靠，已自動同步至編碼器（末端相對移動精度可能受影響）");
+                    return (int[])_lastCommandedAngles.Clone();
+                }
+
+                return (int[])_lastCommandedAngles.Clone();
+            }
         }
 
         // ════════════════════════════════════════
@@ -122,7 +211,9 @@ namespace Robot.Motion.RA605
 
             _log.Info($"MoveToPosture：目標角度 [{string.Join(", ", targetMdeg.Select(a => $"{a / 1000f:F2}°"))}]，時間 {moveTimeMs}ms");
 
-            return AxisCard.MoveMultiAxisPVT(dataCount, targetPos, targetTime, strVel, endVel);
+            var result = AxisCard.MoveMultiAxisPVT(dataCount, targetPos, targetTime, strVel, endVel);
+            if (result) UpdateCommandedAngles(targetMdeg);
+            return result;
         }
 
         // ════════════════════════════════════════
@@ -203,6 +294,9 @@ namespace Robot.Motion.RA605
             // 所有軸減速停止
             for (ushort i = 0; i < AXIS_COUNT; i++)
                 AxisCard.Stop(i, 0.3);
+
+            // 持續移動停止後同步命令位置（停止位置由減速決定，需從編碼器讀取）
+            SyncCommandedPosition();
 
             _log.Info("持續相對移動已停止");
             return true;
@@ -432,8 +526,18 @@ namespace Robot.Motion.RA605
                 return false;
             }
 
-            // 1. 目前姿態
-            var currentPos = AxisCard.Pos;
+            // 檢查是否有軸處於 PV 模式，拒絕執行
+            for (int i = 0; i < AXIS_COUNT; i++)
+            {
+                if (_pvActive[i])
+                {
+                    _log.Warn($"MoveRelativeEndEffector 拒絕：軸{i} 正處於 PV 模式，請先停止 PV 再執行末端相對移動");
+                    return false;
+                }
+            }
+
+            // 1. 取得命令位置作為基準（避免運動中讀取編碼器導致位置飄移）
+            var currentPos = GetCommandedBasePosition();
             var currentPosture = _kin.ForwardMdeg(currentPos);
             var curXYZ = RA605Kinematics.ExtractPosition(currentPosture);
 
@@ -474,37 +578,50 @@ namespace Robot.Motion.RA605
             if (!string.IsNullOrEmpty(ikDiagnostic))
                 _log.Warn($"MoveRelativeEndEffector：{ikDiagnostic}");
 
-            // 4. 計算移動時間（由 maxSpeed 和最大軸位移決定）
+            // 4. 計算各軸位移與速度分配
+            int[] deltas = new int[AXIS_COUNT];
             int maxDelta = 0;
             for (int i = 0; i < AXIS_COUNT; i++)
             {
-                int delta = Math.Abs(targetMdeg[i] - currentPos[i]);
-                if (delta > maxDelta) maxDelta = delta;
+                deltas[i] = Math.Abs(targetMdeg[i] - currentPos[i]);
+                if (deltas[i] > maxDelta) maxDelta = deltas[i];
             }
 
-            // 三角形速度曲線（strVel=0, endVel=0）峰值 = 2 * avgVel，
-            // 故需 moveTime = 2 * maxDelta / maxSpeed 才能確保峰值 ≤ maxSpeed
-            int moveTimeMs = maxSpeed > 0 ? Math.Max(300, (int)(maxDelta * 2000.0 / maxSpeed)) : 1000;
-
-            _log.Info($"MoveRelativeEndEffector：Δ=[{dx},{dy},{dz}]mm, Δω=[{dYaw},{dPitch},{dRoll}]mdeg, 最大速度={maxSpeed}, 時間={moveTimeMs}ms");
-
-            // 5. 送多軸 PVT
-            int[] dataCount = new int[AXIS_COUNT];
-            int[][] targetPosArr = new int[AXIS_COUNT][];
-            int[][] targetTimeArr = new int[AXIS_COUNT][];
-            int[] strVel = new int[AXIS_COUNT];
-            int[] endVel = new int[AXIS_COUNT];
-
-            for (int i = 0; i < AXIS_COUNT; i++)
+            if (maxDelta == 0)
             {
-                dataCount[i] = 1;
-                targetPosArr[i] = new[] { targetMdeg[i] };
-                targetTimeArr[i] = new[] { moveTimeMs };
-                strVel[i] = 0;
-                endVel[i] = 0;
+                _log.Info("MoveRelativeEndEffector：位移為零，無需移動");
+                return true;
             }
 
-            return AxisCard.MoveMultiAxisPVT(dataCount, targetPosArr, targetTimeArr, strVel, endVel);
+            // maxSpeed 代表最大位移軸的 constVel，其餘軸按位移比例縮放
+            // 梯形曲線同步：各軸 tAcc/tDec 相同，constVel 按比例 → 同時到達
+            const double tAcc = 0.3;
+            const double tDec = 0.3;
+
+            _log.Info($"MoveRelativeEndEffector：Δ=[{dx},{dy},{dz}]mm, Δω=[{dYaw},{dPitch},{dRoll}]mdeg, maxSpeed={maxSpeed}");
+
+            // 5. 逐軸發送 MoveAbsolute
+            bool allOk = true;
+            for (ushort i = 0; i < AXIS_COUNT; i++)
+            {
+                if (deltas[i] == 0) continue; // 無位移的軸不送指令
+
+                int constVel = (int)((long)deltas[i] * maxSpeed / maxDelta);
+                if (constVel < 1) constVel = 1; // 最小速度保護
+
+                _log.Info($"  軸{i}：目標={targetMdeg[i] / 1000f:F2}°, Δ={deltas[i] / 1000f:F2}°, V={constVel} mdeg/s");
+
+                if (!AxisCard.MoveAbsolute(i, targetMdeg[i], 0, constVel, 0, tAcc, tDec))
+                {
+                    _log.Warn($"  軸{i} MoveAbsolute 失敗");
+                    allOk = false;
+                }
+            }
+
+            // 更新命令位置（即使部分軸失敗，仍以目標角度為命令位置）
+            if (allOk) UpdateCommandedAngles(targetMdeg);
+
+            return allOk;
         }
 
         // ════════════════════════════════════════
@@ -516,7 +633,9 @@ namespace Robot.Motion.RA605
                                       double tAcc, double tDec)
         {
             _log.Info($"MoveAxisAbsolute：軸{axis} → {angleMdeg / 1000f:F2}°, V={constVel}");
-            return AxisCard.MoveAbsolute(axis, angleMdeg, 0, constVel, 0, tAcc, tDec);
+            var result = AxisCard.MoveAbsolute(axis, angleMdeg, 0, constVel, 0, tAcc, tDec);
+            if (result) UpdateCommandedAxis(axis, angleMdeg);
+            return result;
         }
 
         /// <inheritdoc />
@@ -524,14 +643,81 @@ namespace Robot.Motion.RA605
                                       double tAcc, double tDec)
         {
             _log.Info($"MoveAxisRelative：軸{axis} Δ{deltaAngleMdeg / 1000f:F2}°, V={constVel}");
-            return AxisCard.MoveRelative(axis, deltaAngleMdeg, 0, constVel, 0, tAcc, tDec);
+            var result = AxisCard.MoveRelative(axis, deltaAngleMdeg, 0, constVel, 0, tAcc, tDec);
+            if (result)
+            {
+                // 相對移動：命令位置 = 當前命令位置 + 相對量
+                lock (_cmdPosLock)
+                {
+                    _lastCommandedAngles ??= (int[])AxisCard.Pos.Clone();
+                    _lastCommandedAngles[axis] += deltaAngleMdeg;
+                }
+            }
+            return result;
         }
 
         /// <inheritdoc />
         public bool MoveHome(int constVel, double tAcc, double tDec)
         {
             _log.Info("MoveHome：所有軸回原點");
-            return AxisCard.MoveHome(constVel, tAcc, tDec);
+            var result = AxisCard.MoveHome(constVel, tAcc, tDec);
+            if (result) UpdateCommandedAngles(new int[AXIS_COUNT]); // 原點 = 全零
+            return result;
+        }
+
+        // ════════════════════════════════════════
+        // PV 軸管理（內部）
+        // ════════════════════════════════════════
+
+        /// <summary>查詢指定軸是否正處於 PV 模式。</summary>
+        internal bool IsPvActive(ushort axis) => axis < AXIS_COUNT && _pvActive[axis];
+
+        /// <summary>
+        /// 啟動指定軸的 PV 模式。若該軸已在 PV 則改用 ChangeVelocity 變速。
+        /// </summary>
+        internal bool StartOrUpdatePV(ushort axis, int strVel, int constVel, double tAcc)
+        {
+            if (_pvActive[axis])
+            {
+                // 已在 PV 模式：使用變速指令
+                _log.Info($"PV 軸{axis} 已啟動，改用 ChangeVelocity：{constVel} mdeg/s, tAcc={tAcc}s");
+                return AxisCard.ChangeVelocity(axis, constVel, tAcc);
+            }
+
+            // 首次啟動 PV
+            MarkPositionUnreliable();
+            _pvActive[axis] = true;
+            _log.Info($"PV 啟動：軸{axis}, strVel={strVel}, constVel={constVel}, tAcc={tAcc}");
+            return AxisCard.MovePV(axis, strVel, constVel, tAcc);
+        }
+
+        /// <summary>
+        /// 停止指定軸並清除 PV 狀態，同步命令位置。
+        /// </summary>
+        internal bool StopAxis(ushort axis, double tDec)
+        {
+            var result = AxisCard.Stop(axis, tDec);
+            if (result)
+            {
+                _pvActive[axis] = false;
+                // 停止後同步命令位置（停止位置由減速決定）
+                SyncCommandedPosition();
+            }
+            return result;
+        }
+
+        /// <summary>急停後的內部處理：標記位置不可靠，清除所有 PV 狀態。</summary>
+        internal void OnEstop()
+        {
+            Array.Clear(_pvActive, 0, AXIS_COUNT);
+            MarkPositionUnreliable();
+        }
+
+        /// <summary>警報解除後的內部處理：同步命令位置。</summary>
+        internal void OnAlarmCleared()
+        {
+            Array.Clear(_pvActive, 0, AXIS_COUNT);
+            SyncCommandedPosition();
         }
 
         // ════════════════════════════════════════

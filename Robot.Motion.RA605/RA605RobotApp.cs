@@ -90,15 +90,27 @@ namespace Robot.Motion.RA605
 
         /// <summary>
         /// 對所有軸執行緊急停止。
+        /// 內部自動標記命令位置不可靠並清除 PV 狀態。
         /// </summary>
         /// <returns>成功回傳 true，失敗回傳 false。</returns>
-        public bool Estop() => _driver.Estop();
+        public bool Estop()
+        {
+            var result = _driver.Estop();
+            _motion.OnEstop();
+            return result;
+        }
 
         /// <summary>
         /// 清除警報並嘗試回到可運轉狀態。
+        /// 內部自動同步命令位置。
         /// </summary>
         /// <returns>成功回傳 true，失敗回傳 false。</returns>
-        public bool Ralm() => _driver.Ralm();
+        public bool Ralm()
+        {
+            var result = _driver.Ralm();
+            if (result) _motion.OnAlarmCleared();
+            return result;
+        }
 
         // ===== 高階運動 =====
 
@@ -157,12 +169,13 @@ namespace Robot.Motion.RA605
 
         /// <summary>
         /// 指定軸立即停止（無視該軸隊列，透過變速減速至 0 後停止）。
+        /// 內部自動清除 PV 狀態並同步命令位置。
         /// </summary>
         /// <param name="axis">軸號（0-5）。</param>
         /// <param name="tDec">減速時間（秒），預設 0.5。</param>
         /// <returns>成功回傳 true，否則 false。</returns>
         public bool Stop(ushort axis, double tDec = 0.5)
-            => _driver.Stop(axis, tDec);
+            => _motion.StopAxis(axis, tDec);
 
         /// <summary>
         /// 停止末端持續相對移動。
@@ -215,6 +228,19 @@ namespace Robot.Motion.RA605
         /// <returns>命令送出成功回傳 true，否則 false。</returns>
         public bool MoveHome(int constVel = 20000, double tAcc = 0.5, double tDec = 0.5)
             => _motion.MoveHome(constVel, tAcc, tDec);
+
+        /// <summary>
+        /// 單軸等速持續移動（PV 模式）。
+        /// 重複對同一軸呼叫時自動改用變速指令（ChangeVelocity）。
+        /// 停止後內部自動同步命令位置。
+        /// </summary>
+        /// <param name="axis">軸號（0-5）。</param>
+        /// <param name="strVel">起始速度（mdeg/s）。</param>
+        /// <param name="constVel">等速速度（mdeg/s，正=正向/負=反向）。</param>
+        /// <param name="tAcc">加速時間（秒）。</param>
+        /// <returns>命令送出成功回傳 true，否則 false。</returns>
+        public bool MovePV(ushort axis, int strVel, int constVel, double tAcc)
+            => _motion.StartOrUpdatePV(axis, strVel, constVel, tAcc);
 
         // ===== 原點標定 =====
 

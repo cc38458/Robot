@@ -108,5 +108,6 @@ namespace Robot.Core.Interfaces
         /// <param name="tAcc">加速時間（秒）</param>
         /// <param name="tDec">減速時間（秒）</param>
         bool MoveHome(int constVel, double tAcc, double tDec);
+
     }
 }
