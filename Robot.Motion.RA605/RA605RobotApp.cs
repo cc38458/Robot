@@ -71,7 +71,7 @@ namespace Robot.Motion.RA605
         /// <summary>
         /// 建立與後端（Real/Mock）的連線。
         /// </summary>
-        /// <returns>成功回傳 true，失敗回傳 false。</returns>
+        /// <returns>連線指令送出成功回傳 true，失敗回傳 false。</returns>
         public bool Connect() => _driver.Start();
 
         /// <summary>

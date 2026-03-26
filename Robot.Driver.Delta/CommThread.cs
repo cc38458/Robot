@@ -152,9 +152,9 @@ namespace Robot.Driver.Delta
         // ════════════════════════════════════════
 
         /// <summary>
-        /// 啟動通訊線程並執行 EtherCAT 連線，阻塞至連線完成或逾時。
+        /// 啟動通訊線程並開始 EtherCAT 連線流程，不等待實際連線完成。
         /// </summary>
-        /// <returns>連線成功回傳 true，否則 false。</returns>
+        /// <returns>通訊線程成功啟動並已送出連線流程回傳 true，否則 false。</returns>
         public bool StartConnection()
         {
             if (_running) return false;
@@ -168,11 +168,18 @@ namespace Robot.Driver.Delta
                 IsBackground = false, // 非背景，避免主線程結束時被強殺
                 Priority = ThreadPriority.AboveNormal,
             };
-            _thread.Start();
-
-            // 等待連線結果
-            _startSignal.Wait(TimeSpan.FromSeconds(20));
-            return _connectResult;
+            try
+            {
+                _thread.Start();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _running = false;
+                _cardState = CardState.NULL;
+                _log.Fatal("通訊線程啟動失敗", ex);
+                return false;
+            }
         }
 
         /// <summary>
@@ -695,9 +702,9 @@ namespace Robot.Driver.Delta
                     if (r1 == 0)
                         _pos[i] = _isMockBackend ? pos : (int)(1000L * (pos - _zeroPulse[i]) / _pulse2Ang[i]);
 
-                    // 速度：僅在讀取成功時更新
+                    // 速度：Mock 模式直接回傳 mdeg/s；Real 模式由 pulse/s 轉為 mdeg/s
                     if (r2 == 0)
-                        _speed[i] = speed;
+                        _speed[i] = _isMockBackend ? speed : (int)(1000L * speed / _pulse2Ang[i]);
 
                     // 狀態字：僅在讀取成功時檢查警報
                     if (r4 == 0 && (statusWord & 0x0008) != 0)

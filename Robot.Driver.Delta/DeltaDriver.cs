@@ -14,6 +14,8 @@ namespace Robot.Driver.Delta
     {
         private const int AXIS_COUNT = 6;
         private const int HEARTBEAT_INTERVAL_MS = 200;
+        private const int CONNECT_WAIT_TIMEOUT_MS = 20000;
+        private const int CONNECT_WAIT_POLL_MS = 50;
 
         private readonly RobotLogger _log;
         private readonly CommThread _comm;
@@ -76,11 +78,11 @@ namespace Robot.Driver.Delta
             if (result)
             {
                 _heartbeatTimer.Change(HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_MS);
-                _log.Info("連線成功，心跳計時器已啟動");
+                _log.Info("連線指令已送出，狀態切換為 CONNING，心跳計時器已啟動");
             }
             else
             {
-                _log.Error("連線失敗");
+                _log.Error("連線指令送出失敗");
             }
 
             RefreshState();
@@ -90,6 +92,17 @@ namespace Robot.Driver.Delta
         public bool Initial()
         {
             RefreshState();
+            if (_cardState == CardState.CONNING)
+            {
+                int waitedMs = 0;
+                while (_cardState == CardState.CONNING && waitedMs < CONNECT_WAIT_TIMEOUT_MS)
+                {
+                    Thread.Sleep(CONNECT_WAIT_POLL_MS);
+                    waitedMs += CONNECT_WAIT_POLL_MS;
+                    RefreshState();
+                }
+            }
+
             if (_cardState != CardState.CONNCET)
             {
                 _log.Warn($"Initial() 拒絕：目前狀態為 {_cardState}，需為 CONNCET");

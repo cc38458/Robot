@@ -26,7 +26,7 @@ Demo.EndEffector/
 Robot.Test.MockVerification/
 CommService/
 
-# 自動產生的報告
+# 報告
 docs/
 
 # 其他
