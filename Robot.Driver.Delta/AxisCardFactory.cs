@@ -52,11 +52,14 @@ namespace Robot.Driver.Delta
                 // 同一目錄
                 Path.Combine(AppContext.BaseDirectory, "Robot.CommService.exe"),
                 Path.Combine(AppContext.BaseDirectory, "Robot.CommService"),
+                Path.Combine(AppContext.BaseDirectory, "Robot.CommService.dll"),
                 // dotnet run 模式
                 Path.Combine(AppContext.BaseDirectory, "..", "Robot.CommService",
                     "bin", "Debug", "net8.0", "Robot.CommService.exe"),
                 Path.Combine(AppContext.BaseDirectory, "..", "Robot.CommService",
                     "bin", "Debug", "net8.0", "Robot.CommService"),
+                Path.Combine(AppContext.BaseDirectory, "..", "Robot.CommService",
+                    "bin", "Debug", "net8.0", "Robot.CommService.dll"),
             };
 
             foreach (var candidate in candidates)
@@ -66,8 +69,7 @@ namespace Robot.Driver.Delta
                     return fullPath;
             }
 
-            // 找不到就用 dotnet run 方式
-            return "dotnet";
+            throw new FileNotFoundException("找不到 Robot.CommService 可執行檔或 DLL。");
         }
     }
 }

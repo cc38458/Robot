@@ -26,6 +26,7 @@ namespace Robot.CommService
         private static DeltaDriver? _driver;
         private static SharedMemoryState? _shm;
         private static RobotLogger? _log;
+        private static int _shutdownStarted;
 
         static int Main(string[] args)
         {
@@ -42,6 +43,21 @@ namespace Robot.CommService
             _log.Info($"  Mock={useMock}, ZeroConfig={zeroConfig}");
             _log.Info($"  SHM={shmPath}");
             _log.Info("═══════════════════════════════════════════");
+
+            AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+            {
+                SafeShutdown("ProcessExit");
+            };
+            Console.CancelKeyPress += (_, e) =>
+            {
+                e.Cancel = true;
+                _running = false;
+                SafeShutdown("CancelKeyPress");
+            };
+            AppDomain.CurrentDomain.UnhandledException += (_, _) =>
+            {
+                SafeShutdown("UnhandledException");
+            };
 
             try
             {
@@ -160,6 +176,7 @@ namespace Robot.CommService
                     "Initial" => _driver!.Initial(),
                     "Estop" => _driver!.Estop(),
                     "Ralm" => _driver!.Ralm(),
+                    "CalibrateZero" => _driver!.CalibrateZero(),
                     "Stop" => _driver!.Stop(req.Axis ?? 0, req.TDec ?? 0.5),
                     "ChangeVelocity" => _driver!.ChangeVelocity(
                         req.Axis ?? 0, req.NewSpeed ?? 0, req.TSec ?? 1.0),
@@ -278,6 +295,7 @@ namespace Robot.CommService
         /// </summary>
         private static void SafeShutdown(string reason)
         {
+            if (Interlocked.Exchange(ref _shutdownStarted, 1) != 0) return;
             if (_driver == null) return;
 
             _log!.Warn($"安全關機啟動（原因：{reason}）");

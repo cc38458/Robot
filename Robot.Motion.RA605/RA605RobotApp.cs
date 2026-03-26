@@ -1,5 +1,6 @@
 using System.Numerics;
 using Robot.Core.Enums;
+using Robot.Core.Interfaces;
 using Robot.Core.Logging;
 using Robot.Driver.Delta;
 
@@ -15,7 +16,7 @@ namespace Robot.Motion.RA605
     public sealed class RA605RobotApp : IDisposable
     {
         private readonly RobotLogger _log;
-        private readonly DeltaDriver _driver;
+        private readonly IAxisCard _driver;
         private readonly MotionController _motion;
 
         private MonitorServer? _monitor;
@@ -54,16 +55,23 @@ namespace Robot.Motion.RA605
             float toolLength = 0f,
             string logDirectory = "logs",
             string logPrefix = "RA605App",
-            LogLevel logLevel = LogLevel.INFO)
+            LogLevel logLevel = LogLevel.INFO,
+            bool useOutOfProcess = true,
+            string? commServicePath = null)
         {
             BackendMode = backendMode;
             _log = new RobotLogger(logDirectory, logPrefix, logLevel);
 
             bool useMock = backendMode == RobotBackendMode.Mock;
-            _driver = new DeltaDriver(_log, zeroConfigPath, useMockBackend: useMock);
+            _driver = AxisCardFactory.Create(
+                _log,
+                zeroConfigPath: zeroConfigPath,
+                useMock: useMock,
+                useOutOfProcess: useOutOfProcess,
+                commServicePath: commServicePath);
             _motion = new MotionController(_driver, _log, toolLength);
 
-            _log.Info($"RA605RobotApp 建立完成，後端模式：{backendMode}");
+            _log.Info($"RA605RobotApp 建立完成，後端模式：{backendMode}, OutOfProcess={useOutOfProcess}");
         }
 
         // ===== 生命週期 =====

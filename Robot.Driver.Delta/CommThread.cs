@@ -1095,11 +1095,33 @@ namespace Robot.Driver.Delta
         /// <summary>釋放資源並等待通訊線程結束。</summary>
         public void Dispose()
         {
-            _running = false;
+            if (_thread != null && _thread.IsAlive)
+            {
+                if (_cardState >= CardState.CONNCET)
+                {
+                    _estopRequested = true;
+                    _endRequested = true;
+                }
+                else
+                {
+                    _running = false;
+                }
+            }
+            else
+            {
+                _running = false;
+            }
+
             _startSignal.Set();
             _initSignal.Set();
             _calibrateSignal.Set();
-            _thread?.Join(TimeSpan.FromSeconds(5));
+
+            if (_thread != null && !_thread.Join(TimeSpan.FromSeconds(5)))
+            {
+                _running = false;
+                _thread.Join(TimeSpan.FromSeconds(1));
+            }
+
             _startSignal.Dispose();
             _initSignal.Dispose();
             _calibrateSignal.Dispose();

@@ -121,10 +121,14 @@ namespace Robot.Driver.Delta
             {
                 // 啟動 CommService 行程
                 _log.Info($"啟動 CommService：{_commServicePath}");
+                bool launchWithDotnet = string.Equals(
+                    Path.GetExtension(_commServicePath), ".dll", StringComparison.OrdinalIgnoreCase);
                 var psi = new ProcessStartInfo
                 {
-                    FileName = _commServicePath,
-                    Arguments = string.Join(" ", _commServiceArgs),
+                    FileName = launchWithDotnet ? "dotnet" : _commServicePath,
+                    Arguments = launchWithDotnet
+                        ? $"\"{_commServicePath}\" {string.Join(" ", _commServiceArgs)}"
+                        : string.Join(" ", _commServiceArgs),
                     UseShellExecute = false,
                     CreateNoWindow = true,
                 };
@@ -179,6 +183,7 @@ namespace Robot.Driver.Delta
         public bool Initial() => SendCommand(new PipeRequest { Cmd = "Initial" });
         public bool Estop() => SendCommand(new PipeRequest { Cmd = "Estop" });
         public bool Ralm() => SendCommand(new PipeRequest { Cmd = "Ralm" });
+        public bool CalibrateZero() => SendCommand(new PipeRequest { Cmd = "CalibrateZero" });
 
         // ════════════════════════════════════════
         // IAxisCard 運動控制
@@ -336,6 +341,18 @@ namespace Robot.Driver.Delta
             _disposed = true;
 
             _heartbeatTimer?.Change(Timeout.Infinite, Timeout.Infinite);
+
+            if (!_commServiceDead)
+            {
+                try { SendCommand(new PipeRequest { Cmd = "Estop" }); } catch { }
+                try
+                {
+                    Thread.Sleep(300);
+                    SendCommand(new PipeRequest { Cmd = "End" });
+                }
+                catch { }
+            }
+
             _heartbeatTimer?.Dispose();
 
             _reader?.Dispose();

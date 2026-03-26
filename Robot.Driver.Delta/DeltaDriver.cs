@@ -180,6 +180,8 @@ namespace Robot.Driver.Delta
             return true;
         }
 
+        public bool CalibrateZero() => _comm.RequestCalibrateZero();
+
         // ════════════════════════════════════════
         // 運動控制
         // ════════════════════════════════════════
@@ -304,13 +306,6 @@ namespace Robot.Driver.Delta
 
             return _comm.EnqueueCommand(cmd);
         }
-
-        /// <summary>
-        /// 原點標定：將目前各軸真實編碼器位置存為新的零點設定檔。
-        /// 僅 Real 後端有效；Mock 後端回傳 false。
-        /// 前提：AxisCardState >= CONNCET（通常在 READY 狀態下執行）。
-        /// </summary>
-        public bool CalibrateZero() => _comm.RequestCalibrateZero();
 
         public bool MoveHome(int constVel, double tAcc, double tDec)
         {
