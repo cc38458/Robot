@@ -35,6 +35,12 @@ namespace Robot.Core.Interfaces
         int[] TargetJointSpeedMdegPerSec { get; }
 
         /// <summary>
+        /// 最近一拍 continuous loop 真正送出的關節命令速度（mdeg/s）。
+        /// 若目前不在持續移動模式，回傳零向量。
+        /// </summary>
+        int[] CommandedJointSpeedMdegPerSec { get; }
+
+        /// <summary>
         /// 持續移動控制中的虛擬末端位置 [X, Y, Z]（mm）。
         /// 若目前不在持續移動模式，回傳目前末端位置。
         /// </summary>

@@ -24,6 +24,10 @@ namespace Robot.Motion.RA605
         private const int CSP_TRACKING_SLOWDOWN_FULL_MDEG = 8_000;
         private const int IK_UNSOLVED_LOG_INTERVAL = 10;        // IK 無解時每 N 拍記錄一次，避免洗版
         private const int CSP_DEBUG_SNAPSHOT_INTERVAL = 5;      // 每 N 拍輸出一次 CSP 診斷快照
+        private const int CSP_FINALIZE_STOP_TDEC_MS = 200;
+        private const int CSP_FINALIZE_MOVE_TACC_MS = 100;
+        private const int CSP_FINALIZE_MOVE_TDEC_MS = 200;
+        private const int CSP_FINALIZE_WAIT_TIMEOUT_MS = 3000;
 
         // RA605 各軸軟體限位（mdeg）— 進入 CSP 持續模式時，依目標關節位置方向選擇目標端
         // 對應 RA605Kinematics.cs 中 JOINT_MIN/JOINT_MAX（單位：度 × 1000）
@@ -44,6 +48,7 @@ namespace Robot.Motion.RA605
         private bool _continuousVirtualPostureValid;
         private int[]? _currentTargetJointAngles;
         private int[] _currentTargetJointSpeedMdegPerSec = new int[AXIS_COUNT];
+        private int[] _currentCommandedJointSpeedMdegPerSec = new int[AXIS_COUNT];
         private int[]? _continuousIkReferenceMdeg;
         private float _lastContinuousTrackingScale = 1f;
         private float _lastContinuousSingularScale = 1f;
@@ -117,6 +122,21 @@ namespace Robot.Motion.RA605
                 lock (_continuousLock)
                 {
                     return (int[])_currentTargetJointSpeedMdegPerSec.Clone();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 最近一拍 continuous loop 真正送出的關節命令速度（mdeg/s）。
+        /// 若目前未處於持續移動，回傳零向量。
+        /// </summary>
+        public int[] CommandedJointSpeedMdegPerSec
+        {
+            get
+            {
+                lock (_continuousLock)
+                {
+                    return (int[])_currentCommandedJointSpeedMdegPerSec.Clone();
                 }
             }
         }
@@ -462,6 +482,7 @@ namespace Robot.Motion.RA605
                 _currentTargetJointAngles = (int[])initPos.Clone();
                 _continuousIkReferenceMdeg = (int[])initPos.Clone();
                 _currentTargetJointSpeedMdegPerSec = new int[AXIS_COUNT];
+                _currentCommandedJointSpeedMdegPerSec = new int[AXIS_COUNT];
                 _lastContinuousTrackingScale = 1f;
                 _lastContinuousSingularScale = 1f;
                 _lastContinuousCartesianSlowdownScale = 1f;
@@ -507,6 +528,8 @@ namespace Robot.Motion.RA605
 
             try
             {
+                int[]? finalizeTargetMdeg = null;
+                string? finalizeReason = null;
                 while (_continuousRunning && AxisCard.AxisCardState == CardState.READY)
                 {
                     loopCount++;
@@ -532,8 +555,8 @@ namespace Robot.Motion.RA605
                     if (stopTarget != null)
                     {
                         _log.Info($"CSP stop request 已進入控制迴圈：target=[{FormatMdegArray(stopTarget)}]");
-                        AxisCard.AbortAndChangePosition(stopTarget, 0.3);
-                        Thread.Sleep(400);
+                        finalizeTargetMdeg = stopTarget;
+                        finalizeReason = "external_stop";
                         break;
                     }
 
@@ -551,14 +574,15 @@ namespace Robot.Motion.RA605
                             _log.Warn($"CSP 持續移動：零向量停機退回當前編碼器位置 | {zeroStopIkDiag}");
 
                         _log.Info($"CSP 零向量停機：target=[{FormatMdegArray(zeroStopTarget)}]");
-                        AxisCard.AbortAndChangePosition(zeroStopTarget, 0.3);
                         lock (_continuousLock)
                         {
                             _currentTargetJointAngles = (int[])zeroStopTarget.Clone();
                             _continuousIkReferenceMdeg = (int[])zeroStopTarget.Clone();
                             _currentTargetJointSpeedMdegPerSec = new int[AXIS_COUNT];
+                            _currentCommandedJointSpeedMdegPerSec = new int[AXIS_COUNT];
                         }
-                        Thread.Sleep(400); // 等待減速完成
+                        finalizeTargetMdeg = zeroStopTarget;
+                        finalizeReason = "zero_vector";
                         break;
                     }
 
@@ -734,6 +758,7 @@ namespace Robot.Motion.RA605
                     lock (_continuousLock)
                     {
                         _currentTargetJointSpeedMdegPerSec = (int[])desiredVelMdegPerSec.Clone();
+                        _currentCommandedJointSpeedMdegPerSec = (int[])prevVelMdegPerSec.Clone();
                     }
 
                     if (loopCount % CSP_DEBUG_SNAPSHOT_INTERVAL == 0)
@@ -750,6 +775,11 @@ namespace Robot.Motion.RA605
                     if (sleepMs > 0) Thread.Sleep(sleepMs);
                     sw.Restart();
                 }
+
+                if (finalizeTargetMdeg != null && AxisCard.AxisCardState == CardState.READY)
+                {
+                    FinalizeContinuousMoveToTarget(finalizeTargetMdeg, finalizeReason ?? "stop");
+                }
             }
             catch (Exception ex)
             {
@@ -765,6 +795,7 @@ namespace Robot.Motion.RA605
                     _continuousVirtualPostureValid = false;
                     _currentTargetJointAngles = null;
                     _currentTargetJointSpeedMdegPerSec = new int[AXIS_COUNT];
+                    _currentCommandedJointSpeedMdegPerSec = new int[AXIS_COUNT];
                     _continuousIkReferenceMdeg = null;
                     _lastContinuousTrackingScale = 1f;
                     _lastContinuousSingularScale = 1f;
@@ -776,6 +807,68 @@ namespace Robot.Motion.RA605
             }
 
             _log.Info("CSP 持續移動控制迴圈結束");
+        }
+
+        private void FinalizeContinuousMoveToTarget(int[] targetMdeg, string reason)
+        {
+            _log.Info($"CSP 結束收尾：reason={reason}, target=[{FormatMdegArray(targetMdeg)}]");
+
+            for (ushort i = 0; i < AXIS_COUNT; i++)
+            {
+                AxisCard.Stop(i, CSP_FINALIZE_STOP_TDEC_MS / 1000.0);
+            }
+
+            Thread.Sleep(CSP_FINALIZE_STOP_TDEC_MS + 80);
+
+            var currentMdeg = AxisCard.Pos;
+            bool anyMoveIssued = false;
+            for (ushort i = 0; i < AXIS_COUNT; i++)
+            {
+                int deltaMdeg = targetMdeg[i] - currentMdeg[i];
+                if (Math.Abs(deltaMdeg) <= CSP_JOINT_DEADBAND_MDEG)
+                    continue;
+
+                int constVel = Math.Clamp(Math.Abs(deltaMdeg) * 4, 3_000, CSP_MAX_CMD_VEL_MDEG);
+                bool ok = AxisCard.MoveAbsolute(
+                    i,
+                    targetMdeg[i],
+                    0,
+                    constVel,
+                    0,
+                    CSP_FINALIZE_MOVE_TACC_MS / 1000.0,
+                    CSP_FINALIZE_MOVE_TDEC_MS / 1000.0);
+
+                if (!ok)
+                {
+                    _log.Warn($"CSP 結束收尾：軸{i + 1} MoveAbsolute 失敗，退回 AbortAndChangePosition");
+                    AxisCard.AbortAndChangePosition(targetMdeg, CSP_FINALIZE_MOVE_TDEC_MS / 1000.0);
+                    Thread.Sleep(CSP_FINALIZE_MOVE_TDEC_MS + 100);
+                    return;
+                }
+
+                anyMoveIssued = true;
+            }
+
+            lock (_continuousLock)
+            {
+                _currentTargetJointAngles = (int[])targetMdeg.Clone();
+                _continuousIkReferenceMdeg = (int[])targetMdeg.Clone();
+                _currentTargetJointSpeedMdegPerSec = new int[AXIS_COUNT];
+            }
+
+            if (!anyMoveIssued)
+                return;
+
+            var waitSw = System.Diagnostics.Stopwatch.StartNew();
+            while (waitSw.ElapsedMilliseconds < CSP_FINALIZE_WAIT_TIMEOUT_MS)
+            {
+                if (AxisCard.State.All(state => state == MotorState.STOP))
+                    return;
+
+                Thread.Sleep(50);
+            }
+
+            _log.Warn("CSP 結束收尾：等待 MoveAbsolute 完成逾時");
         }
 
         private static int SelectCspLimitTarget(int axis, int currentMdeg, int targetMdeg)

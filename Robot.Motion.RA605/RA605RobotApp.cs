@@ -43,6 +43,8 @@ namespace Robot.Motion.RA605
         public int[] TargetJointAngles => _motion.TargetJointAngles;
         /// <summary>最近一拍 continuous loop 的目標關節速度（mdeg/s）。</summary>
         public int[] TargetJointSpeedMdegPerSec => _motion.TargetJointSpeedMdegPerSec;
+        /// <summary>最近一拍 continuous loop 真正送出的關節命令速度（mdeg/s）。</summary>
+        public int[] CommandedJointSpeedMdegPerSec => _motion.CommandedJointSpeedMdegPerSec;
         /// <summary>持續移動控制中的虛擬末端位置 [X,Y,Z]（mm）。</summary>
         public float[] VirtualEndEffectorPosition => _motion.VirtualEndEffectorPosition;
         /// <summary>最近一拍 continuous loop 的 tracking slowdown scale。</summary>
