@@ -64,7 +64,7 @@ namespace Robot.Driver.Delta
         // ── 連線資訊 ──
         private ushort _cardNo;
         private ushort _axisNum;
-        private int[] _pulse2Ang = DEFAULT_PULSE2ANG;
+        private readonly int[] _pulse2Ang = DEFAULT_PULSE2ANG;
         private int[] _zeroPulse = new int[AXIS_COUNT];
 
         // ── 線程控制 ──
@@ -183,7 +183,7 @@ namespace Robot.Driver.Delta
         }
 
         /// <summary>
-        /// 請求初始化所有軸（齒輪比、零點、Servo ON），阻塞至完成。
+        /// 請求初始化所有軸（零點、Servo ON），阻塞至完成。
         /// </summary>
         /// <returns>初始化成功回傳 true，否則 false。</returns>
         public bool RequestInitial()
@@ -492,7 +492,7 @@ namespace Robot.Driver.Delta
         // ════════════════════════════════════════
 
         /// <summary>
-        /// 初始化各軸：載入零點設定、Servo ON、CSP 模式、齒輪比、虛擬座標。
+        /// 初始化各軸：載入零點設定、Servo ON、CSP 模式。
         /// </summary>
         private bool DoInitialize()
         {
@@ -526,29 +526,17 @@ namespace Robot.Driver.Delta
                 _log.DllReturn("Set_MoveMode", ret, $"軸{i} → CSP");
                 if (ret != 0) return false;
 
-                // 設定齒輪比
-                ret = _ecat.CS_ECAT_Slave_CSP_Set_Gear(_cardNo, i, 0, _pulse2Ang[i], 1000, 1);
-                _log.DllReturn("Set_Gear", ret, $"軸{i}: {_pulse2Ang[i]}/1000");
+                int posPulse = 0;
+                ret = _ecat.CS_ECAT_Slave_Motion_Get_Actual_Position(_cardNo, i, 0, ref posPulse);
+                _log.DllReturn("Get_Actual_Position", ret, $"軸{i}: 真實位置={posPulse} pulse");
                 if (ret != 0) return false;
 
-                // 啟用虛擬位置
-                ret = _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Enable(_cardNo, i, 0, 1);
-                _log.DllReturn("Virtual_Set_Enable", ret, $"軸{i}");
-                if (ret != 0) return false;
-
-                // 讀取當前實際位置並設定虛擬座標
-                int pos = 0;
-                _ecat.CS_ECAT_Slave_Motion_Get_Actual_Position(_cardNo, i, 0, ref pos);
-                _log.DllReturn("Get_Actual_Position", 0, $"軸{i}:真實位置={pos}");
-
-                // Mock 模式：pos 已是 mdeg，直接使用
-                // Real 模式：pos 是 encoder pulse，需轉換
-                int initPos = _isMockBackend ? pos : (int)(1000L * (pos - _zeroPulse[i]) / _pulse2Ang[i]);
-                ret = _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Command(_cardNo, i, 0, initPos);
-                _log.DllReturn("Virtual_Set_Command", ret, $"軸{i}: 當前位置={initPos}");
-                
-
-                lock (_stateLock) { _state[i] = MotorState.STOP; }
+                lock (_stateLock)
+                {
+                    _pos[i] = PulseToMdeg(i, posPulse);
+                    _speed[i] = 0;
+                    _state[i] = MotorState.STOP;
+                }
             }
 
             _log.Info("所有軸初始化完成，Servo ON");
@@ -556,7 +544,7 @@ namespace Robot.Driver.Delta
         }
 
         /// <summary>
-        /// 從設定檔載入零點脈波數與齒輪比，檔案不存在或失敗時使用預設值。
+        /// 從設定檔載入零點脈波數，檔案不存在或失敗時使用預設值。
         /// </summary>
         private void LoadZeroConfig()
         {
@@ -569,7 +557,6 @@ namespace Robot.Driver.Delta
                     if (config != null)
                     {
                         _zeroPulse = config.ZeroPulse;
-                        _pulse2Ang = config.Pulse2Ang;
                         _log.Info($"已載入零點設定檔：{_zeroConfigPath}");
                         return;
                     }
@@ -582,12 +569,11 @@ namespace Robot.Driver.Delta
 
             // 建立預設設定檔
             _zeroPulse = new int[AXIS_COUNT];
-            _pulse2Ang = DEFAULT_PULSE2ANG;
             SaveZeroConfig([0,0,0,0,0,0]);
         }
 
         /// <summary>
-        /// 將零點脈波數與齒輪比序列化並寫入設定檔。
+        /// 將零點脈波數序列化並寫入設定檔。
         /// </summary>
         private void SaveZeroConfig(int[] newPos)
         {
@@ -596,9 +582,8 @@ namespace Robot.Driver.Delta
                 var config = new AxisZeroConfig
                 {
                     ZeroPulse = newPos,
-                    Pulse2Ang = _pulse2Ang,
                     LastModified = DateTime.Now,
-                    Note = "各軸零點絕對脈波數與齒輪比設定",
+                    Note = "各軸零點絕對脈波數設定",
                 };
                 var json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
                 File.WriteAllText(_zeroConfigPath, json);
@@ -612,9 +597,7 @@ namespace Robot.Driver.Delta
 
         /// <summary>
         /// 在通訊線程中執行原點標定。
-        /// 直接從硬體讀取各軸當前位置，換算為絕對脈波數後存入設定檔。
-        /// 邏輯：Get_Position 在 Virtual 模式回傳虛擬座標（= 物理 − oldZeroPulse），
-        ///       因此絕對物理脈波 = oldZeroPulse + virtualPos。
+        /// 直接從硬體讀取各軸當前實際位置，存為新的 ZeroPulse。
         /// </summary>
         private bool DoCalibrate()
         {
@@ -631,17 +614,18 @@ namespace Robot.Driver.Delta
                 for (ushort i = 0; i < AXIS_COUNT; i++)
                 {
                     int pos = 0;
-                    _ecat.CS_ECAT_Slave_Motion_Get_Actual_Position(_cardNo, i, 0, ref pos);
-                    newZeroPulse[i] =  pos;
+                    var ret = _ecat.CS_ECAT_Slave_Motion_Get_Actual_Position(_cardNo, i, 0, ref pos);
+                    _log.DllReturn("Get_Actual_Position", ret, $"軸{i}: 校正位置={pos} pulse");
+                    if (ret != 0) return false;
+                    newZeroPulse[i] = pos;
                 }
+                _zeroPulse = newZeroPulse;
                 SaveZeroConfig(newZeroPulse);
                 _log.Info("原點標定完成，已儲存零點設定檔");
-
-                for (ushort i = 0; i < AXIS_COUNT; i++)
+                lock (_stateLock)
                 {
-                    // 設定當前位置
-                    _ecat.CS_ECAT_Slave_CSP_Virtual_Set_Command(_cardNo, i, 0, 0);
-                    _log.DllReturn("Virtual_Set_Command", 0, $"軸{i}: 當前位置={0}");
+                    Array.Clear(_pos, 0, AXIS_COUNT);
+                    Array.Clear(_speed, 0, AXIS_COUNT);
                 }
                 return true;
             }
@@ -700,11 +684,11 @@ namespace Robot.Driver.Delta
                 {
                     // 位置：僅在讀取成功時更新
                     if (r1 == 0)
-                        _pos[i] = _isMockBackend ? pos : (int)(1000L * (pos - _zeroPulse[i]) / _pulse2Ang[i]);
+                        _pos[i] = PulseToMdeg(i, pos);
 
-                    // 速度：Mock 模式直接回傳 mdeg/s；Real 模式由 pulse/s 轉為 mdeg/s
+                    // 速度：由原始 pulse/s 轉為 mdeg/s
                     if (r2 == 0)
-                        _speed[i] = _isMockBackend ? speed : (int)(1000L * speed / _pulse2Ang[i]);
+                        _speed[i] = PulseSpeedToMdegPerSec(i, speed);
 
                     // 狀態字：僅在讀取成功時檢查警報
                     if (r4 == 0 && (statusWord & 0x0008) != 0)
@@ -844,28 +828,40 @@ namespace Robot.Driver.Delta
             switch (cmd.Type)
             {
                 case CommandType.MoveAbsolute:
-                    ret = _ecat.CS_ECAT_Slave_CSP_Start_Move(
-                        _cardNo, cmd.Axis, 0,
-                        cmd.Dist, cmd.StrVel, cmd.ConstVel, cmd.EndVel,
-                        cmd.TAcc, cmd.TDec, 0, 1); // SCurve=0, IsAbs=1
-                    _log.DllReturn("CSP_Start_Move(Abs)", ret);
-                    if (ret == 0) lock (_stateLock) { _state[cmd.Axis] = MotorState.MOVING; }
-                    break;
+                    {
+                        int distPulse = MdegToPulse(cmd.Axis, cmd.Dist);
+                        ret = _ecat.CS_ECAT_Slave_CSP_Start_Move(
+                            _cardNo, cmd.Axis, 0,
+                            distPulse,
+                            MdegPerSecToPulsePerSec(cmd.Axis, cmd.StrVel),
+                            MdegPerSecToPulsePerSec(cmd.Axis, cmd.ConstVel),
+                            MdegPerSecToPulsePerSec(cmd.Axis, cmd.EndVel),
+                            cmd.TAcc, cmd.TDec, 0, 1); // SCurve=0, IsAbs=1
+                        _log.DllReturn("CSP_Start_Move(Abs)", ret, $"軸{cmd.Axis}: {cmd.Dist} mdeg -> {distPulse} pulse");
+                        if (ret == 0) lock (_stateLock) { _state[cmd.Axis] = MotorState.MOVING; }
+                        break;
+                    }
 
                 case CommandType.MoveRelative:
-                    ret = _ecat.CS_ECAT_Slave_CSP_Start_Move(
-                        _cardNo, cmd.Axis, 0,
-                        cmd.Dist, cmd.StrVel, cmd.ConstVel, cmd.EndVel,
-                        cmd.TAcc, cmd.TDec, 0, 0); // IsAbs=0
-                    _log.DllReturn("CSP_Start_Move(Rel)", ret);
-                    if (ret == 0) lock (_stateLock) { _state[cmd.Axis] = MotorState.MOVING; }
-                    break;
+                    {
+                        int distPulse = MdegDeltaToPulse(cmd.Axis, cmd.Dist);
+                        ret = _ecat.CS_ECAT_Slave_CSP_Start_Move(
+                            _cardNo, cmd.Axis, 0,
+                            distPulse,
+                            MdegPerSecToPulsePerSec(cmd.Axis, cmd.StrVel),
+                            MdegPerSecToPulsePerSec(cmd.Axis, cmd.ConstVel),
+                            MdegPerSecToPulsePerSec(cmd.Axis, cmd.EndVel),
+                            cmd.TAcc, cmd.TDec, 0, 0); // IsAbs=0
+                        _log.DllReturn("CSP_Start_Move(Rel)", ret, $"軸{cmd.Axis}: Δ{cmd.Dist} mdeg -> Δ{distPulse} pulse");
+                        if (ret == 0) lock (_stateLock) { _state[cmd.Axis] = MotorState.MOVING; }
+                        break;
+                    }
 
                 case CommandType.MovePV:
                     {
                         ushort dir = (ushort)(cmd.ConstVel >= 0 ? 0 : 1);
-                        int absVel = Math.Abs(cmd.ConstVel);
-                        int absStr = Math.Abs(cmd.StrVel);
+                        int absVel = Math.Abs(MdegPerSecToPulsePerSec(cmd.Axis, cmd.ConstVel));
+                        int absStr = Math.Abs(MdegPerSecToPulsePerSec(cmd.Axis, cmd.StrVel));
                         ret = _ecat.CS_ECAT_Slave_CSP_Start_V_Move(
                             _cardNo, cmd.Axis, 0,
                             dir, absStr, absVel, cmd.TAcc, 0);
@@ -877,10 +873,12 @@ namespace Robot.Driver.Delta
                 case CommandType.MovePT:
                     if (cmd.TargetPos != null && cmd.TargetTime != null)
                     {
+                        int[] targetPulse = ConvertMdegArrayToPulse(cmd.Axis, cmd.TargetPos, isAbsolute: true);
                         ret = _ecat.CS_ECAT_Slave_CSP_Start_PVTComplete_Move(
                             _cardNo, cmd.Axis, 0,
-                            cmd.DataCount, ref cmd.TargetPos[0], ref cmd.TargetTime[0],
-                            cmd.StrVel, cmd.EndVel, 1); // Abs=1
+                            cmd.DataCount, ref targetPulse[0], ref cmd.TargetTime[0],
+                            MdegPerSecToPulsePerSec(cmd.Axis, cmd.StrVel),
+                            MdegPerSecToPulsePerSec(cmd.Axis, cmd.EndVel), 1); // Abs=1
                         _log.DllReturn("CSP_PVTComplete_Move", ret);
                         if (ret == 0) lock (_stateLock) { _state[cmd.Axis] = MotorState.MOVING; }
                     }
@@ -892,7 +890,9 @@ namespace Robot.Driver.Delta
                     break;
 
                 case CommandType.VelocityChange:
-                    ret = _ecat.CS_ECAT_Slave_CSP_Velocity_Change(_cardNo, cmd.Axis, 0, cmd.NewTargetSpd, cmd.TSec);
+                    ret = _ecat.CS_ECAT_Slave_CSP_Velocity_Change(
+                        _cardNo, cmd.Axis, 0,
+                        MdegPerSecToPulsePerSec(cmd.Axis, cmd.NewTargetSpd), cmd.TSec);
                     _log.DllReturn("CSP_Velocity_Change", ret, $"軸{cmd.Axis} → {cmd.NewTargetSpd} mdeg/s, {cmd.TSec}s");
                     break;
             }
@@ -914,12 +914,14 @@ namespace Robot.Driver.Delta
             for (ushort i = 0; i < AXIS_COUNT; i++)
             {
                 if (cmd.MultiDataCount[i] <= 0) continue;
+                int[] targetPulse = ConvertMdegArrayToPulse(i, cmd.MultiTargetPos[i], isAbsolute: true);
                 var ret = _ecat.CS_ECAT_Slave_CSP_Start_PVTComplete_Config(
                     _cardNo, i, 0,
                     cmd.MultiDataCount[i],
-                    ref cmd.MultiTargetPos[i][0],
+                    ref targetPulse[0],
                     ref cmd.MultiTargetTime[i][0],
-                    cmd.MultiStrVel[i], cmd.MultiEndVel[i], 1);
+                    MdegPerSecToPulsePerSec(i, cmd.MultiStrVel[i]),
+                    MdegPerSecToPulsePerSec(i, cmd.MultiEndVel[i]), 1);
                 _log.DllReturn("PVTComplete_Config", ret, $"軸{i}");
             }
 
@@ -1125,6 +1127,29 @@ namespace Robot.Driver.Delta
             _startSignal.Dispose();
             _initSignal.Dispose();
             _calibrateSignal.Dispose();
+        }
+
+        private int PulseToMdeg(int axis, int pulse)
+            => (int)(1000L * (pulse - _zeroPulse[axis]) / _pulse2Ang[axis]);
+
+        private int PulseSpeedToMdegPerSec(int axis, int pulsePerSec)
+            => (int)(1000L * pulsePerSec / _pulse2Ang[axis]);
+
+        private int MdegToPulse(int axis, int mdeg)
+            => (int)((long)mdeg * _pulse2Ang[axis] / 1000) + _zeroPulse[axis];
+
+        private int MdegDeltaToPulse(int axis, int mdeg)
+            => (int)((long)mdeg * _pulse2Ang[axis] / 1000);
+
+        private int MdegPerSecToPulsePerSec(int axis, int mdegPerSec)
+            => (int)((long)mdegPerSec * _pulse2Ang[axis] / 1000);
+
+        private int[] ConvertMdegArrayToPulse(ushort axis, int[] source, bool isAbsolute)
+        {
+            var pulse = new int[source.Length];
+            for (int i = 0; i < source.Length; i++)
+                pulse[i] = isAbsolute ? MdegToPulse(axis, source[i]) : MdegDeltaToPulse(axis, source[i]);
+            return pulse;
         }
     }
 }

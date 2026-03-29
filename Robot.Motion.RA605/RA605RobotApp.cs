@@ -83,7 +83,7 @@ namespace Robot.Motion.RA605
         public bool Connect() => _driver.Start();
 
         /// <summary>
-        /// 初始化軸卡與各軸（齒輪比、零點、Servo ON）。
+        /// 初始化軸卡與各軸（零點、CSP、Servo ON）。
         /// </summary>
         /// <returns>成功回傳 true，失敗回傳 false。</returns>
         public bool Initialize() => _driver.Initial();

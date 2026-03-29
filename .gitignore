@@ -25,6 +25,7 @@ axis_zero_config.json
 Demo.EndEffector/
 Robot.Test.MockVerification/
 CommService/
+test/
 
 # 報告
 docs/

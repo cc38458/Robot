@@ -52,7 +52,7 @@ namespace Robot.Core.Interfaces
         /// <summary>
         /// 初始化所有軸並 Servo ON
         /// 前提：AxisCardState == CONNCET
-        /// 動作：設定齒輪比、讀取零點設定、Virtual_Set、Servo ON
+        /// 動作：讀取零點設定、切到 CSP、Servo ON，並由 CommThread 自行處理 pulse↔mdeg 換算
         ///       成功後 AxisCardState → READY，各軸 State → STOP
         /// </summary>
         bool Initial();
