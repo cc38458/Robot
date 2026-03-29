@@ -244,6 +244,9 @@ namespace Robot.Driver.Delta
                 Cmd = "MoveHome", ConstVel = constVel, TAcc = tAcc, TDec = tDec,
             });
 
+        public bool AbortAndChangePosition(int[] targetMdeg, double tDec)
+            => SendCommand(new PipeRequest { Cmd = "AbortAndChangePosition", MultiDist = targetMdeg, TDec = tDec });
+
         // ════════════════════════════════════════
         // 內部
         // ════════════════════════════════════════

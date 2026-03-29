@@ -85,6 +85,11 @@ namespace Robot.Driver.Delta
         /// <summary>多軸同步啟動 PVT 運動。</summary>
         ushort CS_ECAT_Slave_CSP_Start_PVT_Sync_Move(ushort CardNo, ushort AxisNum,
             ref ushort AxisArray, ref ushort SlotArray);
+
+        /// <summary>多軸同步終止並切換至指定位置（CSP Abort and Change Position）。</summary>
+        ushort CS_ECAT_Slave_CSP_Abort_and_Change_Position(ushort CardNo, ushort Axes,
+            ref ushort NodeID, ref ushort SlotID, ref int Dist,
+            int MaxVel, int EndVel, double Tacc, double Tdec, ushort CurveMode);
     }
 
     /// <summary>
@@ -158,6 +163,12 @@ namespace Robot.Driver.Delta
         /// <inheritdoc />
         public ushort CS_ECAT_Slave_CSP_Start_PVT_Sync_Move(ushort CardNo, ushort AxisNum, ref ushort AxisArray, ref ushort SlotArray)
             => CEtherCAT_DLL.CS_ECAT_Slave_CSP_Start_PVT_Sync_Move(CardNo, AxisNum, ref AxisArray, ref SlotArray);
+
+        /// <inheritdoc />
+        public ushort CS_ECAT_Slave_CSP_Abort_and_Change_Position(ushort CardNo, ushort Axes,
+            ref ushort NodeID, ref ushort SlotID, ref int Dist,
+            int MaxVel, int EndVel, double Tacc, double Tdec, ushort CurveMode)
+            => CEtherCAT_DLL.CS_ECAT_Slave_CSP_Abort_and_Change_Position(CardNo, Axes, ref NodeID, ref SlotID, ref Dist, MaxVel, EndVel, Tacc, Tdec, CurveMode);
     }
 
     /// <summary>
@@ -231,5 +242,11 @@ namespace Robot.Driver.Delta
         /// <inheritdoc />
         public ushort CS_ECAT_Slave_CSP_Start_PVT_Sync_Move(ushort CardNo, ushort AxisNum, ref ushort AxisArray, ref ushort SlotArray)
             => CEtherCAT_Mock.CS_ECAT_Slave_CSP_Start_PVT_Sync_Move(CardNo, AxisNum, ref AxisArray, ref SlotArray);
+
+        /// <inheritdoc />
+        public ushort CS_ECAT_Slave_CSP_Abort_and_Change_Position(ushort CardNo, ushort Axes,
+            ref ushort NodeID, ref ushort SlotID, ref int Dist,
+            int MaxVel, int EndVel, double Tacc, double Tdec, ushort CurveMode)
+            => 0; // Mock 直接回傳成功
     }
 }

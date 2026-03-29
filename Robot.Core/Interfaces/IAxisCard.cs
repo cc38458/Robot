@@ -146,5 +146,14 @@ namespace Robot.Core.Interfaces
         /// 前提：AxisCardState == READY，所有軸 State == STOP
         /// </summary>
         bool MoveHome(int constVel, double tAcc, double tDec);
+
+        /// <summary>
+        /// 多軸同步終止並以指定減速時間切換至目標位置（CSP Abort and Change Position）。
+        /// 立即清除所有指令隊列並觸發 DLL 多軸同步煞停至目標。
+        /// 前提：AxisCardState == READY
+        /// </summary>
+        /// <param name="targetMdeg">目標角度陣列（單位 mdeg），需含 6 元素</param>
+        /// <param name="tDec">減速時間（秒）</param>
+        bool AbortAndChangePosition(int[] targetMdeg, double tDec);
     }
 }

@@ -86,6 +86,12 @@ namespace Robot.Driver.Delta
         private volatile bool _calibrateResult;
         private readonly ManualResetEventSlim _calibrateSignal = new(false);
 
+        // ── AbortAndChangePosition 請求 ──
+        private volatile bool _abortChangePosRequested = false;
+        private readonly int[] _abortChangePosTargetMdeg = new int[AXIS_COUNT];
+        private double _abortChangePosTDec;
+        private readonly object _abortChangePosLock = new();
+
         // ── 日誌 ──
         private readonly RobotLogger _log;
         private readonly IEtherCatApi _ecat;
@@ -263,6 +269,29 @@ namespace Robot.Driver.Delta
             _log.Info($"收到軸 {axis} 立即停止請求 (tDec={tDec}s)");
         }
 
+        /// <summary>
+        /// 主線程呼叫：清除所有隊列並發出多軸同步終止+切換至指定位置的請求。
+        /// </summary>
+        public void RequestAbortAndChangePosition(int[] targetMdeg, double tDec)
+        {
+            if (targetMdeg == null || targetMdeg.Length < AXIS_COUNT) return;
+
+            lock (_queueLock)
+            {
+                for (int i = 0; i < AXIS_COUNT; i++)
+                    _queues[i].Clear();
+                UpdateQueueLengths();
+            }
+
+            lock (_abortChangePosLock)
+            {
+                Array.Copy(targetMdeg, _abortChangePosTargetMdeg, AXIS_COUNT);
+                _abortChangePosTDec = tDec;
+                _abortChangePosRequested = true;
+            }
+            _log.Info($"收到 AbortAndChangePosition 請求 (tDec={tDec}s)");
+        }
+
         // ════════════════════════════════════════
         // 指令入隊（主線程呼叫）
         // ════════════════════════════════════════
@@ -374,6 +403,9 @@ namespace Robot.Driver.Delta
 
                     // ── 立即停止請求（每軸獨立，非阻塞狀態機） ──
                     ProcessImmediateStops();
+
+                    // ── AbortAndChangePosition 請求 ──
+                    ProcessAbortAndChangePosition();
 
                     // ── 初始化請求 ──
                     if (_initRequested)
@@ -1020,6 +1052,38 @@ namespace Robot.Driver.Delta
                     _stopPhase[i] = StopPhase.None;
                 }
             }
+        }
+
+        /// <summary>
+        /// 處理 AbortAndChangePosition 請求：呼叫多軸同步終止並切換至目標位置的 DLL 函式。
+        /// </summary>
+        private void ProcessAbortAndChangePosition()
+        {
+            if (!_abortChangePosRequested) return;
+
+            int[] targetMdeg;
+            double tDec;
+            lock (_abortChangePosLock)
+            {
+                if (!_abortChangePosRequested) return;
+                targetMdeg = (int[])_abortChangePosTargetMdeg.Clone();
+                tDec = _abortChangePosTDec;
+                _abortChangePosRequested = false;
+            }
+
+            var nodeIds = new ushort[] { 0, 1, 2, 3, 4, 5 };
+            var slotIds = new ushort[] { 0, 0, 0, 0, 0, 0 };
+            var targetPulse = new int[AXIS_COUNT];
+            for (int i = 0; i < AXIS_COUNT; i++)
+                targetPulse[i] = MdegToPulse(i, targetMdeg[i]);
+
+            int maxVelPulse = MdegPerSecToPulsePerSec(0, 500_000);
+
+            var ret = _ecat.CS_ECAT_Slave_CSP_Abort_and_Change_Position(
+                _cardNo, AXIS_COUNT,
+                ref nodeIds[0], ref slotIds[0], ref targetPulse[0],
+                maxVelPulse, 0, 0.05, tDec, 0);
+            _log.DllReturn("CSP_Abort_and_Change_Position", ret, $"tDec={tDec}s");
         }
 
         /// <summary>對所有軸執行警報復歸（Ralm）並重新 Servo ON。</summary>

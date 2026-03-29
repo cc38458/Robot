@@ -32,7 +32,8 @@ namespace Robot.Core.IPC
         /// <summary>
         /// 指令名稱，對應 IAxisCard 方法名：
         /// Start, End, Initial, Estop, Ralm, Stop, ChangeVelocity,
-        /// MoveAbsolute, MoveRelative, MovePV, MovePT, MoveMultiAxisPVT, MoveHome
+        /// MoveAbsolute, MoveRelative, MovePV, MovePT, MoveMultiAxisPVT, MoveHome,
+        /// AbortAndChangePosition
         /// </summary>
         public string Cmd { get; set; } = "";
 
@@ -58,6 +59,10 @@ namespace Robot.Core.IPC
         public int[][]? MultiTargetTime { get; set; }
         public int[]? MultiStrVel { get; set; }
         public int[]? MultiEndVel { get; set; }
+
+        // ── AbortAndChangePosition 專用 ──
+        /// <summary>各軸目標角度（mdeg），共 6 元素</summary>
+        public int[]? MultiDist { get; set; }
     }
 
     /// <summary>

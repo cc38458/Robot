@@ -307,6 +307,29 @@ namespace Robot.Driver.Delta
             return _comm.EnqueueCommand(cmd);
         }
 
+        public bool AbortAndChangePosition(int[] targetMdeg, double tDec)
+        {
+            RefreshState();
+            if (_cardState != CardState.READY)
+            {
+                _log.Warn($"AbortAndChangePosition() 拒絕：狀態 {_cardState} ≠ READY");
+                return false;
+            }
+            if (targetMdeg == null || targetMdeg.Length < AXIS_COUNT)
+            {
+                _log.Warn("AbortAndChangePosition() 拒絕：targetMdeg 長度不足");
+                return false;
+            }
+            if (tDec <= 0)
+            {
+                _log.Warn("AbortAndChangePosition() 拒絕：tDec 必須 > 0");
+                return false;
+            }
+
+            _comm.RequestAbortAndChangePosition(targetMdeg, tDec);
+            return true;
+        }
+
         public bool MoveHome(int constVel, double tAcc, double tDec)
         {
             RefreshState();

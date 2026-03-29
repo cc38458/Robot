@@ -12,15 +12,14 @@ namespace Robot.Motion.RA605
     public class MotionController : IMotionController
     {
         private const int AXIS_COUNT = 6;
-        private const int CONTINUOUS_CYCLE_MS = 50;  // 持續移動控制迴圈週期
-        private const int PVT_POINTS_PER_BATCH = 10; // 每批 PVT 點數
-        private const int MAX_JOINT_JUMP_MDEG = 30_000; // 單步最大關節跳動（30°）
+        private const int CSP_LOOP_INTERVAL_MS = 100;           // 持續移動控制迴圈週期
+        private const float CSP_LOOP_PERIOD_SEC = 0.1f;         // 與上方保持一致（秒）
+        private const int CSP_MAX_VEL_STEP_MDEG = 2000;         // 每 100ms 允許的最大速度變化量（mdeg/s）
 
-        // 持續移動加速度上限
-        private const float MAX_LINEAR_ACCEL  = 150f;     // mm/s²（線速度加速度）
-        private const float MAX_ANGULAR_ACCEL = 90_000f;  // mdeg/s²（= 90 deg/s²，角速度加速度）
-        // 每批次發送週期（睡眠時間），用於計算每批速度允許變化量
-        private const float BATCH_PERIOD_SEC  = CONTINUOUS_CYCLE_MS * PVT_POINTS_PER_BATCH / 2 / 1000f;
+        // RA605 各軸軟體限位（mdeg）— 進入 CSP 持續模式時，每軸選擇距離當前位置較遠的一端作為目標
+        // 對應 RA605Kinematics.cs 中 JOINT_MIN/JOINT_MAX（單位：度 × 1000）
+        private static readonly int[] CSP_JOINT_LIMIT_POS = {  165_000,  85_000, 185_000,  190_000,  115_000,  360_000 };
+        private static readonly int[] CSP_JOINT_LIMIT_NEG = { -165_000, -125_000, -55_000, -190_000, -115_000, -360_000 };
 
         private readonly RA605Kinematics _kin;
         private readonly RobotLogger _log;
@@ -30,13 +29,6 @@ namespace Robot.Motion.RA605
         private volatile bool _continuousRunning;
         private readonly object _continuousLock = new();
         private float _cdx, _cdy, _cdz, _cdYaw, _cdPitch, _cdRoll; // 目標速度向量（由外部設定）
-
-        // 追蹤當前已命令的 EE 速度（已套用加速度限制），僅由 ContinuousMoveLoop 存取
-        private float _curVelX, _curVelY, _curVelZ;
-        private float _curVelYaw, _curVelPitch, _curVelRoll;
-
-        // 前一批次 PVT 的末速度（mdeg/s），作為下批次的 strVel，確保批次銜接速度連續
-        private readonly int[] _prevBatchEndVel = new int[AXIS_COUNT];
 
         // ── 命令位置追蹤 ──
         // 記錄最後一次運動指令的目標角度（mdeg），用於末端相對移動的基準計算
@@ -291,44 +283,51 @@ namespace Robot.Motion.RA605
             _continuousThread?.Join(TimeSpan.FromSeconds(2));
             _continuousThread = null;
 
-            // 所有軸減速停止
-            for (ushort i = 0; i < AXIS_COUNT; i++)
-                AxisCard.Stop(i, 0.3);
+            // CSP 模式停止：以當前編碼器位置為目標，減速時間 0.3s
+            AxisCard.AbortAndChangePosition(AxisCard.Pos, 0.3);
 
-            // 持續移動停止後同步命令位置（停止位置由減速決定，需從編碼器讀取）
+            // 持續移動停止後同步命令位置
             SyncCommandedPosition();
-
-            _log.Info("持續相對移動已停止");
+            _log.Info("CSP 持續相對移動已停止");
             return true;
         }
 
         /// <summary>
-        /// 持續移動控制迴圈
-        /// 每個週期：讀取目前位姿 → 用已加速度限制的 EE 速度產生 PVT 點 → IK → 送 PVT
-        ///
-        /// 速度連續性：以 _prevBatchEndVel 作為本批 strVel，確保批次間關節速度連續。
-        /// 加速度限制：_curVelX/Y/Z/Yaw/Pitch/Roll 以 MAX_LINEAR/ANGULAR_ACCEL 逐批限速，
-        ///             批次內軌跡點依 prevVel→curVel 線性速度斜坡積分產生，
-        ///             使第一點位移極小（與 strVel≈0 一致），自然平滑加速。
+        /// CSP 持續移動控制迴圈
+        /// 啟動時對六軸送出指向極限位置的絕對移動指令，進入 CSP 持續模式。
+        /// 每 100ms：讀取速度向量 → 累積虛擬末端姿態 → IK → 讀取編碼器 →
+        ///           計算目標速度 [(目標mdeg - 當前mdeg) / 0.1s] → 加速度限幅 → 發送 ChangeVelocity。
+        /// 增量為零或停止時：呼叫 AbortAndChangePosition 以當前編碼器位置為目標，減速時間 0.3s。
         /// </summary>
         private void ContinuousMoveLoop()
         {
-            _log.Info("持續移動控制迴圈啟動");
+            _log.Info("CSP 持續移動控制迴圈啟動");
 
-            // 每次啟動都從靜止狀態起算
-            _curVelX = _curVelY = _curVelZ = 0f;
-            _curVelYaw = _curVelPitch = _curVelRoll = 0f;
-            Array.Clear(_prevBatchEndVel, 0, AXIS_COUNT);
+            // 初始化虛擬末端姿態（從當前編碼器位置計算 FK）
+            var initPos = AxisCard.Pos;
+            var virtualPosture = _kin.ForwardMdeg(initPos);
 
-            const float dtSec = CONTINUOUS_CYCLE_MS / 1000f;
-            const int   pointCount = PVT_POINTS_PER_BATCH;
-            const float T = pointCount * dtSec; // 整批軌跡總時長 (s)
+            // 每軸前一拍已命令速度（mdeg/s），用於加速度限幅
+            var prevVelMdegPerSec = new int[AXIS_COUNT];
+
+            // 進入 CSP 持續模式：每軸選擇距當前位置較遠的軟體限位作為目標
+            // （strVel=0, constVel=1, endVel=1 → 軸以 1 mdeg/s 緩速向限位移動，進入 CSP 等待狀態）
+            for (ushort i = 0; i < AXIS_COUNT; i++)
+            {
+                int distToPos = Math.Abs(CSP_JOINT_LIMIT_POS[i] - initPos[i]);
+                int distToNeg = Math.Abs(initPos[i] - CSP_JOINT_LIMIT_NEG[i]);
+                int limitTarget = distToPos >= distToNeg ? CSP_JOINT_LIMIT_POS[i] : CSP_JOINT_LIMIT_NEG[i];
+                AxisCard.MoveAbsolute(i, limitTarget, 0, 1, 1, 0.1, 0.1);
+            }
+            _log.Info("CSP 持續模式已進入（各軸正在向較遠軟體限位緩速移動）");
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
 
             try
             {
                 while (_continuousRunning && AxisCard.AxisCardState == CardState.READY)
                 {
-                    // ── 1. 讀取目標速度向量 ─────────────────────────────────────
+                    // ── 1. 讀取目標速度向量 ──────────────────────────────────────
                     float dx, dy, dz, dYaw, dPitch, dRoll;
                     lock (_continuousLock)
                     {
@@ -336,180 +335,81 @@ namespace Robot.Motion.RA605
                         dYaw = _cdYaw; dPitch = _cdPitch; dRoll = _cdRoll;
                     }
 
-                    // ── 2. 加速度限制：逐步將 _curVel* 推向目標速度 ─────────────
-                    float linStep = MAX_LINEAR_ACCEL  * BATCH_PERIOD_SEC;
-                    float angStep = MAX_ANGULAR_ACCEL * BATCH_PERIOD_SEC;
-
-                    // 記錄本批次起始速度（斜坡積分用）
-                    float prevVelX     = _curVelX;     float prevVelY     = _curVelY;
-                    float prevVelZ     = _curVelZ;     float prevVelYaw   = _curVelYaw;
-                    float prevVelPitch = _curVelPitch; float prevVelRoll  = _curVelRoll;
-
-                    _curVelX     = Ramp(_curVelX,     dx,     linStep);
-                    _curVelY     = Ramp(_curVelY,     dy,     linStep);
-                    _curVelZ     = Ramp(_curVelZ,     dz,     linStep);
-                    _curVelYaw   = Ramp(_curVelYaw,   dYaw,   angStep);
-                    _curVelPitch = Ramp(_curVelPitch, dPitch, angStep);
-                    _curVelRoll  = Ramp(_curVelRoll,  dRoll,  angStep);
-
-                    // 速度完全歸零則等待（不送空指令）
-                    if (_curVelX == 0 && _curVelY == 0 && _curVelZ == 0 &&
-                        _curVelYaw == 0 && _curVelPitch == 0 && _curVelRoll == 0)
+                    // ── 2. 增量全零：穩定停機 ────────────────────────────────────
+                    if (dx == 0 && dy == 0 && dz == 0 &&
+                        dYaw == 0 && dPitch == 0 && dRoll == 0)
                     {
-                        // 確保下次重新啟動時 strVel = 0（機器人已靜止）
-                        Array.Clear(_prevBatchEndVel, 0, AXIS_COUNT);
-                        Thread.Sleep(CONTINUOUS_CYCLE_MS);
-                        continue;
+                        AxisCard.AbortAndChangePosition(AxisCard.Pos, 0.3);
+                        Thread.Sleep(400); // 等待減速完成
+                        break;
                     }
 
-                    // ── 3. 讀取目前末端姿態 ──────────────────────────────────────
-                    var currentPos = AxisCard.Pos; // mdeg
-                    var currentPosture = _kin.ForwardMdeg(currentPos);
-                    var curXYZ = RA605Kinematics.ExtractPosition(currentPosture);
+                    // ── 3. 累積虛擬末端姿態 ──────────────────────────────────────
+                    float newX = virtualPosture.M41 + dx * CSP_LOOP_PERIOD_SEC;
+                    float newY = virtualPosture.M42 + dy * CSP_LOOP_PERIOD_SEC;
+                    float newZ = virtualPosture.M43 + dz * CSP_LOOP_PERIOD_SEC;
 
-                    // ── 4. 產生 PVT 軌跡點 ───────────────────────────────────────
-                    // 位置依速度斜坡積分：pos(t) = prevVel*t + (curVel-prevVel)*t²/(2T)
-                    // 斜坡積分使批次內速度從 prevVel 線性增加至 curVel，
-                    // 確保 strVel（來自上批末速）與第一點之位移一致，避免超加速。
-                    int[] dataCount = new int[AXIS_COUNT];
-                    int[][] targetPos = new int[AXIS_COUNT][];
-                    int[][] targetTime = new int[AXIS_COUNT][];
-                    int[] strVel = (int[])_prevBatchEndVel.Clone(); // 前批末速 → 本批起始速
-                    int[] endVel = new int[AXIS_COUNT];
+                    float yawDeg   = dYaw   * CSP_LOOP_PERIOD_SEC / 1000f;
+                    float pitchDeg = dPitch * CSP_LOOP_PERIOD_SEC / 1000f;
+                    float rollDeg  = dRoll  * CSP_LOOP_PERIOD_SEC / 1000f;
 
-                    for (int a = 0; a < AXIS_COUNT; a++)
+                    var rotInc = Matrix4x4.CreateRotationZ(yawDeg   * MathF.PI / 180f)
+                               * Matrix4x4.CreateRotationY(pitchDeg * MathF.PI / 180f)
+                               * Matrix4x4.CreateRotationX(rollDeg  * MathF.PI / 180f);
+
+                    var curRot = new Matrix4x4(
+                        virtualPosture.M11, virtualPosture.M12, virtualPosture.M13, 0,
+                        virtualPosture.M21, virtualPosture.M22, virtualPosture.M23, 0,
+                        virtualPosture.M31, virtualPosture.M32, virtualPosture.M33, 0,
+                        0, 0, 0, 1);
+                    var newRot = rotInc * curRot;
+
+                    virtualPosture.M11 = newRot.M11; virtualPosture.M12 = newRot.M12; virtualPosture.M13 = newRot.M13;
+                    virtualPosture.M21 = newRot.M21; virtualPosture.M22 = newRot.M22; virtualPosture.M23 = newRot.M23;
+                    virtualPosture.M31 = newRot.M31; virtualPosture.M32 = newRot.M32; virtualPosture.M33 = newRot.M33;
+                    virtualPosture.M41 = newX; virtualPosture.M42 = newY; virtualPosture.M43 = newZ;
+
+                    // ── 4. IK 計算目標關節角 ─────────────────────────────────────
+                    var currentMdeg = AxisCard.Pos;
+                    var targetMdeg = _kin.InverseMdeg(virtualPosture, currentMdeg, out var ikDiag);
+                    if (targetMdeg == null)
                     {
-                        targetPos[a]  = new int[pointCount];
-                        targetTime[a] = new int[pointCount];
-                        dataCount[a]  = pointCount;
+                        _log.Warn($"CSP 持續移動：IK 無解，穩定停機 | {ikDiag ?? "無額外診斷"}");
+                        AxisCard.AbortAndChangePosition(AxisCard.Pos, 0.3);
+                        Thread.Sleep(400);
+                        break;
+                    }
+                    if (!string.IsNullOrEmpty(ikDiag))
+                        _log.Warn($"CSP 持續移動：{ikDiag}");
+
+                    // ── 5. 計算目標速度並套用加速度限幅，發送 ChangeVelocity ─────
+                    for (ushort i = 0; i < AXIS_COUNT; i++)
+                    {
+                        int desiredVel = (int)((targetMdeg[i] - currentMdeg[i]) / CSP_LOOP_PERIOD_SEC);
+                        int velChange = desiredVel - prevVelMdegPerSec[i];
+                        int commandedVel = Math.Abs(velChange) > CSP_MAX_VEL_STEP_MDEG
+                            ? prevVelMdegPerSec[i] + Math.Sign(velChange) * CSP_MAX_VEL_STEP_MDEG
+                            : desiredVel;
+
+                        AxisCard.ChangeVelocity(i, commandedVel, CSP_LOOP_PERIOD_SEC);
+                        prevVelMdegPerSec[i] = commandedVel;
                     }
 
-                    bool truncated = false;
-                    int[] prevMdeg = (int[])currentPos.Clone();
-
-                    for (int p = 0; p < pointCount; p++)
-                    {
-                        float t = (p + 1) * dtSec;
-                        float tRamp = t * t / (2f * T); // = t²/(2T)，斜坡積分係數
-
-                        // 末端空間位移（速度斜坡積分）
-                        float newX = curXYZ[0] + prevVelX * t + (_curVelX - prevVelX) * tRamp;
-                        float newY = curXYZ[1] + prevVelY * t + (_curVelY - prevVelY) * tRamp;
-                        float newZ = curXYZ[2] + prevVelZ * t + (_curVelZ - prevVelZ) * tRamp;
-
-                        // 姿態角位移（mdeg→deg，速度斜坡積分）
-                        float yawDeg   = (prevVelYaw   * t + (_curVelYaw   - prevVelYaw)   * tRamp) / 1000f;
-                        float pitchDeg = (prevVelPitch * t + (_curVelPitch - prevVelPitch) * tRamp) / 1000f;
-                        float rollDeg  = (prevVelRoll  * t + (_curVelRoll  - prevVelRoll)  * tRamp) / 1000f;
-
-                        var rotInc = Matrix4x4.CreateRotationZ(yawDeg   * MathF.PI / 180f)
-                                   * Matrix4x4.CreateRotationY(pitchDeg * MathF.PI / 180f)
-                                   * Matrix4x4.CreateRotationX(rollDeg  * MathF.PI / 180f);
-
-                        var curRot = new Matrix4x4(
-                            currentPosture.M11, currentPosture.M12, currentPosture.M13, 0,
-                            currentPosture.M21, currentPosture.M22, currentPosture.M23, 0,
-                            currentPosture.M31, currentPosture.M32, currentPosture.M33, 0,
-                            0, 0, 0, 1);
-                        var newRot = rotInc * curRot;
-
-                        var newPosture = currentPosture;
-                        newPosture.M11 = newRot.M11; newPosture.M12 = newRot.M12; newPosture.M13 = newRot.M13;
-                        newPosture.M21 = newRot.M21; newPosture.M22 = newRot.M22; newPosture.M23 = newRot.M23;
-                        newPosture.M31 = newRot.M31; newPosture.M32 = newRot.M32; newPosture.M33 = newRot.M33;
-                        newPosture.M41 = newX; newPosture.M42 = newY; newPosture.M43 = newZ;
-
-                        var ptMdeg = _kin.InverseMdeg(newPosture, prevMdeg, out var ikDiagnostic);
-                        if (ptMdeg == null)
-                        {
-                            _log.Warn($"持續移動：第 {p} 點 IK 無解，截斷 | {ikDiagnostic ?? "無額外診斷"}");
-                            truncated = true;
-                            for (int a = 0; a < AXIS_COUNT; a++) dataCount[a] = p;
-                            break;
-                        }
-                        if (!string.IsNullOrEmpty(ikDiagnostic))
-                            _log.Warn($"持續移動：第 {p} 點 {ikDiagnostic}");
-
-                        bool jumpExceeded = false;
-                        for (int a = 0; a < AXIS_COUNT; a++)
-                        {
-                            if (Math.Abs(ptMdeg[a] - prevMdeg[a]) > MAX_JOINT_JUMP_MDEG)
-                            {
-                                _log.Warn($"持續移動：第 {p} 點軸{a} 跳動過大（{Math.Abs(ptMdeg[a] - prevMdeg[a]) / 1000f:F1}°），截斷");
-                                jumpExceeded = true;
-                                break;
-                            }
-                        }
-                        if (jumpExceeded)
-                        {
-                            truncated = true;
-                            for (int a = 0; a < AXIS_COUNT; a++) dataCount[a] = p;
-                            break;
-                        }
-
-                        for (int a = 0; a < AXIS_COUNT; a++)
-                        {
-                            targetPos[a][p]  = ptMdeg[a];
-                            targetTime[a][p] = (p + 1) * CONTINUOUS_CYCLE_MS;
-                        }
-                        prevMdeg = ptMdeg;
-                    }
-
-                    // ── 5. 計算末速度並送 PVT ────────────────────────────────────
-                    if (dataCount[0] > 0)
-                    {
-                        for (int a = 0; a < AXIS_COUNT; a++)
-                        {
-                            int cnt = dataCount[a];
-                            // 末速度由最後兩點差分估算（mdeg/s）
-                            endVel[a] = cnt >= 2
-                                ? (int)((targetPos[a][cnt - 1] - targetPos[a][cnt - 2]) / dtSec)
-                                : 0;
-                        }
-
-                        // 截斷情況：強制末速歸零（確保機器人在截止點停下），並重置速度狀態
-                        if (truncated)
-                        {
-                            Array.Clear(endVel, 0, AXIS_COUNT);
-                            _curVelX = _curVelY = _curVelZ = 0f;
-                            _curVelYaw = _curVelPitch = _curVelRoll = 0f;
-                        }
-
-                        AxisCard.MoveMultiAxisPVT(dataCount, targetPos, targetTime, strVel, endVel);
-
-                        // 保存末速度供下批次作為 strVel
-                        endVel.CopyTo(_prevBatchEndVel, 0);
-                    }
-                    else
-                    {
-                        // 無有效點（IK 立即失敗）：重置速度狀態
-                        Array.Clear(_prevBatchEndVel, 0, AXIS_COUNT);
-                        _curVelX = _curVelY = _curVelZ = 0f;
-                        _curVelYaw = _curVelPitch = _curVelRoll = 0f;
-                    }
-
-                    // 等待接近本批執行完畢再送下一批
-                    Thread.Sleep(CONTINUOUS_CYCLE_MS * PVT_POINTS_PER_BATCH / 2);
+                    // ── 6. 補償式等待至下一個 100ms 週期 ────────────────────────
+                    long elapsed = sw.ElapsedMilliseconds % CSP_LOOP_INTERVAL_MS;
+                    int sleepMs = (int)(CSP_LOOP_INTERVAL_MS - elapsed);
+                    if (sleepMs > 0) Thread.Sleep(sleepMs);
+                    sw.Restart();
                 }
             }
             catch (Exception ex)
             {
-                _log.Error("持續移動控制迴圈異常", ex);
+                _log.Error("CSP 持續移動控制迴圈異常", ex);
+                try { AxisCard.AbortAndChangePosition(AxisCard.Pos, 0.3); } catch { }
             }
 
-            // 清理速度狀態
-            Array.Clear(_prevBatchEndVel, 0, AXIS_COUNT);
-            _curVelX = _curVelY = _curVelZ = 0f;
-            _curVelYaw = _curVelPitch = _curVelRoll = 0f;
-
-            _log.Info("持續移動控制迴圈結束");
+            _log.Info("CSP 持續移動控制迴圈結束");
         }
-
-        /// <summary>以最大步長 maxStep 將 current 逼近 target（不超越）</summary>
-        private static float Ramp(float current, float target, float maxStep)
-            => current < target
-                ? MathF.Min(target, current + maxStep)
-                : MathF.Max(target, current - maxStep);
 
         // ════════════════════════════════════════
         // 末端一次性相對移動

@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Robot 未提交改動分析報告</title>
+  <style>
+    :root {
+      --bg: #f4efe6;
+      --panel: #fffaf2;
+      --ink: #1f2933;
+      --muted: #52606d;
+      --line: #d9c9ab;
+      --accent: #8a4b08;
+      --accent-soft: #f2dcc1;
+      --good: #1f6f50;
+      --warn: #8c5a00;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Noto Sans TC", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at top left, #fff7eb 0, #fff7eb 18%, transparent 18%),
+        linear-gradient(180deg, #efe3d1 0%, var(--bg) 28%, #f8f4ed 100%);
+      line-height: 1.7;
+    }
+
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 40px 20px 64px;
+    }
+
+    .hero, .card {
+      background: rgba(255, 250, 242, 0.94);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(84, 63, 41, 0.08);
+    }
+
+    .hero {
+      padding: 32px;
+      margin-bottom: 24px;
+    }
+
+    h1, h2, h3 {
+      margin: 0 0 12px;
+      line-height: 1.2;
+    }
+
+    h1 { font-size: 2rem; }
+    h2 { font-size: 1.35rem; }
+    h3 { font-size: 1.05rem; }
+
+    p { margin: 0 0 12px; }
+
+    .meta {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin: 24px 0;
+    }
+
+    .stat {
+      padding: 18px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 1.8rem;
+      color: var(--accent);
+    }
+
+    .section {
+      margin-top: 20px;
+      padding: 24px;
+    }
+
+    .tag {
+      display: inline-block;
+      margin: 0 8px 8px 0;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: #6d3b06;
+      font-size: 0.88rem;
+      font-weight: 600;
+    }
+
+    .good { color: var(--good); font-weight: 700; }
+    .warn { color: var(--warn); font-weight: 700; }
+
+    ul {
+      margin: 10px 0 0 20px;
+      padding: 0;
+    }
+
+    li { margin: 8px 0; }
+
+    code {
+      padding: 1px 6px;
+      border-radius: 6px;
+      background: #f2eadf;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.95em;
+    }
+
+    .files {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .file {
+      padding: 14px 16px;
+      background: #fffdf8;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+    }
+
+    .file strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--accent);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 14px;
+      background: #fffdf8;
+      overflow: hidden;
+      border-radius: 14px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 12px 14px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #f8ecdc;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <p class="meta">分析來源：`git status --short` 與未提交 `git diff`，並以 <code>--ignore-space-at-eol</code> 排除行尾差異噪音</p>
+      <h1>Robot 未提交改動分析報告</h1>
+      <p>這批未提交改動表面上有 32 個檔案變更，但實際新增的語意功能集中在少數核心檔案。大部分其餘差異在忽略行尾空白後消失，判斷主要是換行或格式調整，不屬於新功能。</p>
+      <div class="grid">
+        <div class="stat">
+          <strong>32</strong>
+          <span>git 顯示有變更的檔案數</span>
+        </div>
+        <div class="stat">
+          <strong>7,435 / 7,412</strong>
+          <span>diff 統計的新增 / 刪除行數</span>
+        </div>
+        <div class="stat">
+          <strong>7</strong>
+          <span>確認有語意變更的核心檔案</span>
+        </div>
+        <div class="stat">
+          <strong>2</strong>
+          <span>主要新能力：新指令 + CSP 持續移動重構</span>
+        </div>
+      </div>
+      <span class="tag">CommService</span>
+      <span class="tag">PipeProtocol</span>
+      <span class="tag">Delta Driver</span>
+      <span class="tag">RA605 MotionController</span>
+      <span class="tag">CSP</span>
+    </section>
+
+    <section class="card section">
+      <h2>結論摘要</h2>
+      <p class="good">此次改動的核心功能是：新增 <code>AbortAndChangePosition</code> 多軸同步終止並切換位置能力，並將 RA605 的持續移動控制從「PVT 批次軌跡」改為「CSP 速度控制迴圈」。</p>
+      <p>這代表系統現在可以在持續移動過程中，直接清空既有佇列、同步煞停，並切換到指定關節位置；同時持續移動流程也改為每 100ms 根據虛擬末端姿態與 IK 結果即時計算關節速度，透過 <code>ChangeVelocity</code> 推進。</p>
+    </section>
+
+    <section class="card section">
+      <h2>新功能一：新增 AbortAndChangePosition 指令鏈</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>層級</th>
+            <th>改動內容</th>
+            <th>目的</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>IPC 協定</td>
+            <td><code>Robot.Core/IPC/PipeProtocol.cs</code> 新增指令名稱說明與 <code>MultiDist</code> 欄位</td>
+            <td>讓管線請求可攜帶六軸目標角度陣列</td>
+          </tr>
+          <tr>
+            <td>介面層</td>
+            <td><code>Robot.Core/Interfaces/IAxisCard.cs</code> 新增 <code>AbortAndChangePosition(int[] targetMdeg, double tDec)</code></td>
+            <td>把新能力正式納入軸卡抽象介面</td>
+          </tr>
+          <tr>
+            <td>通訊服務</td>
+            <td><code>Robot.CommService/Program.cs</code> 新增命令分派</td>
+            <td>讓外部請求可經由 CommService 呼叫驅動</td>
+          </tr>
+          <tr>
+            <td>Pipe 客戶端</td>
+            <td><code>Robot.Driver.Delta/PipeAxisCard.cs</code> 封裝成 PipeRequest 傳送</td>
+            <td>讓 IPC 模式與本地模式 API 一致</td>
+          </tr>
+          <tr>
+            <td>Driver 驗證</td>
+            <td><code>Robot.Driver.Delta/DeltaDriver.cs</code> 新增 READY 狀態、參數長度、減速時間檢查</td>
+            <td>避免在錯誤狀態或非法參數下送命令</td>
+          </tr>
+          <tr>
+            <td>執行緒/硬體層</td>
+            <td><code>Robot.Driver.Delta/CommThread.cs</code> 新增請求快取、清佇列、輪詢處理與 DLL 呼叫</td>
+            <td>真正執行「同步終止並切換到目標位置」</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="files">
+        <div class="file">
+          <strong>功能行為</strong>
+          接到請求後會先清空各軸命令佇列，再由通訊執行緒呼叫 <code>CS_ECAT_Slave_CSP_Abort_and_Change_Position</code>。
+        </div>
+        <div class="file">
+          <strong>輸入資料</strong>
+          目標位置使用 <code>MultiDist</code> 傳遞，單位為 mdeg，預期包含 6 軸資料。
+        </div>
+        <div class="file">
+          <strong>安全條件</strong>
+          驅動層要求軸卡狀態為 <code>READY</code>，且 <code>tDec &gt; 0</code>。
+        </div>
+      </div>
+    </section>
+
+    <section class="card section">
+      <h2>新功能二：RA605 持續移動模式改為 CSP 速度迴圈</h2>
+      <p>最關鍵的行為調整在 <code>Robot.Motion.RA605/MotionController.cs</code>。原本的持續移動流程會組 PVT 批次點、估算批次起終速度，再用 <code>MoveMultiAxisPVT</code> 送出。現在整段流程被替換成 CSP 型式的即時控制。</p>
+      <ul>
+        <li>新增 100ms 週期常數與每拍最大速度變化量 <code>CSP_MAX_VEL_STEP_MDEG</code>。</li>
+        <li>進入持續模式時，先讓每軸朝離當前位置較遠的軟體限位做超低速絕對移動，藉此進入 CSP 可接管的狀態。</li>
+        <li>每個週期先累積「虛擬末端姿態」，再用 IK 算出目標關節角。</li>
+        <li>用 <code>(target - current) / 0.1s</code> 算出期望關節速度，並對速度變化量做限幅，最後逐軸送 <code>ChangeVelocity</code>。</li>
+        <li>當增量歸零、IK 無解、或控制迴圈例外時，不再只是停住或截斷 PVT，而是呼叫 <code>AbortAndChangePosition(AxisCard.Pos, 0.3)</code> 做穩定停機。</li>
+      </ul>
+
+      <div class="files">
+        <div class="file">
+          <strong>被移除的舊策略</strong>
+          舊版的 PVT 批次點生成、批次首尾速度銜接、關節跳動檢查與 <code>Ramp()</code> 緩升函式都已退出主流程。
+        </div>
+        <div class="file">
+          <strong>新的控制核心</strong>
+          改成以目前編碼器位置為回授，每拍重新計算速度命令，更接近即時伺服控制。
+        </div>
+        <div class="file">
+          <strong>停止策略改變</strong>
+          停止邏輯從逐軸 <code>Stop()</code> 改為多軸同步 <code>AbortAndChangePosition()</code>。
+        </div>
+      </div>
+    </section>
+
+    <section class="card section">
+      <h2>實際影響</h2>
+      <ul>
+        <li>持續移動的控制模型改變，系統行為不再依賴 PVT 軌跡批次平滑銜接，而改由 100ms 速度閉環樣式的更新驅動。</li>
+        <li>系統新增一個可從上層直接呼叫的「同步終止並改位置」能力，適合用於平順停機、模式切換或持續移動收尾。</li>
+        <li>RA605 的持續移動一旦收到零增量或 IK 失敗，會主動進入穩定停機，不再只是等待下一批次或保留既有佇列。</li>
+      </ul>
+    </section>
+
+    <section class="card section">
+      <h2>非功能性變更判讀</h2>
+      <p class="warn">大量檔案雖被標記為修改，但在使用 <code>git diff --ignore-space-at-eol</code> 後，多數差異消失。</p>
+      <p>因此像 <code>README.md</code>、多個 <code>.csproj</code>、<code>.sln</code>、列舉與模型檔等，本次比較偏向換行格式或行尾差異，沒有觀察到新增功能邏輯。報告中的功能結論已排除這些噪音。</p>
+    </section>
+
+    <section class="card section">
+      <h2>涉及的核心檔案</h2>
+      <ul>
+        <li><code>Robot.Core/IPC/PipeProtocol.cs</code></li>
+        <li><code>Robot.Core/Interfaces/IAxisCard.cs</code></li>
+        <li><code>Robot.CommService/Program.cs</code></li>
+        <li><code>Robot.Driver.Delta/PipeAxisCard.cs</code></li>
+        <li><code>Robot.Driver.Delta/DeltaDriver.cs</code></li>
+        <li><code>Robot.Driver.Delta/CommThread.cs</code></li>
+        <li><code>Robot.Motion.RA605/MotionController.cs</code></li>
+      </ul>
+    </section>
+  </div>
+</body>
+</html>

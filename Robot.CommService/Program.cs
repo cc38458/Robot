@@ -203,6 +203,8 @@ namespace Robot.CommService
                         req.MultiEndVel ?? Array.Empty<int>()),
                     "MoveHome" => _driver!.MoveHome(
                         req.ConstVel ?? 0, req.TAcc ?? 0, req.TDec ?? 0),
+                    "AbortAndChangePosition" => _driver!.AbortAndChangePosition(
+                        req.MultiDist ?? Array.Empty<int>(), req.TDec ?? 0.3),
                     _ => throw new ArgumentException($"未知指令：{req.Cmd}"),
                 };
 
