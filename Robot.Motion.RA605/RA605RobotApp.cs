@@ -39,6 +39,20 @@ namespace Robot.Motion.RA605
         public float[] EndEffectorPosition => _motion.EndEffectorPosition;
         /// <summary>末端執行器姿態齊次矩陣。</summary>
         public Matrix4x4 EndEffectorPosture => _motion.EndEffectorPosture;
+        /// <summary>目前目標姿態對應的六軸角度（mdeg）。</summary>
+        public int[] TargetJointAngles => _motion.TargetJointAngles;
+        /// <summary>最近一拍 continuous loop 的目標關節速度（mdeg/s）。</summary>
+        public int[] TargetJointSpeedMdegPerSec => _motion.TargetJointSpeedMdegPerSec;
+        /// <summary>持續移動控制中的虛擬末端位置 [X,Y,Z]（mm）。</summary>
+        public float[] VirtualEndEffectorPosition => _motion.VirtualEndEffectorPosition;
+        /// <summary>最近一拍 continuous loop 的 tracking slowdown scale。</summary>
+        public float ContinuousTrackingScale => _motion.ContinuousTrackingScale;
+        /// <summary>最近一拍 continuous loop 的 singular slowdown scale。</summary>
+        public float ContinuousSingularScale => _motion.ContinuousSingularScale;
+        /// <summary>最近一拍 continuous loop 用於累積虛擬末端姿態的 cartesian slowdown scale。</summary>
+        public float ContinuousCartesianSlowdownScale => _motion.ContinuousCartesianSlowdownScale;
+        /// <summary>最近一拍 continuous loop 實際套用到虛擬末端設定點的平移速度 [X,Y,Z]（mm/s）。</summary>
+        public float[] ContinuousAppliedLinearVelocity => _motion.ContinuousAppliedLinearVelocity;
 
         /// <summary>
         /// 建立 RA605 高階控制入口。
@@ -68,7 +82,8 @@ namespace Robot.Motion.RA605
                 zeroConfigPath: zeroConfigPath,
                 useMock: useMock,
                 useOutOfProcess: useOutOfProcess,
-                commServicePath: commServicePath);
+                commServicePath: commServicePath,
+                logLevel: logLevel);
             _motion = new MotionController(_driver, _log, toolLength);
 
             _log.Info($"RA605RobotApp 建立完成，後端模式：{backendMode}, OutOfProcess={useOutOfProcess}");

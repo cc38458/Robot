@@ -283,6 +283,168 @@ namespace Robot.Motion.RA605
             return mdeg;
         }
 
+        /// <summary>
+        /// 逆向運動學分析版：回傳候選解、選中解、奇異資訊，供測試與診斷使用。
+        /// </summary>
+        public InverseAnalysis AnalyzeInverseMdeg(Matrix4x4 eePosture, int[]? refMdeg = null)
+        {
+            float[]? refAngles = refMdeg?.Select(m => m / 1000f).ToArray();
+            string? diagnostic = null;
+
+            var ocPosture = Matrix4x4.CreateTranslation(0, 0, -(D6 + ToolLength)) * eePosture;
+            float ocX = ocPosture.M41;
+            float ocY = ocPosture.M42;
+            float ocZ = ocPosture.M43;
+
+            float axis1 = -MathF.Atan2(ocPosture.M42, ocPosture.M41);
+
+            float R = MathF.Sqrt(ocPosture.M41 * ocPosture.M41 + ocPosture.M42 * ocPosture.M42);
+            float Rp = R - A1;
+            float Zp = ocPosture.M43 - D1;
+
+            float L3 = MathF.Sqrt(A3_Z * A3_Z + A3_X * A3_X);
+            float distSq = Zp * Zp + Rp * Rp;
+
+            float cosD = (A2 * A2 + L3 * L3 - distSq) / (2 * A2 * L3);
+            if (cosD < -1f || cosD > 1f)
+            {
+                diagnostic = $"IK失敗[arm]: OC=({ocX:F1},{ocY:F1},{ocZ:F1}) R={R:F1} Rp={Rp:F1} Zp={Zp:F1} cosD={cosD:F4}";
+                return new InverseAnalysis { Success = false, Diagnostic = diagnostic, WristBetaDeg = null, Candidates = [] };
+            }
+
+            float d = MathF.Acos(cosD);
+            float alpha = MathF.Atan2(A3_X, A3_Z);
+
+            float cosA = (A2 * A2 + distSq - L3 * L3) / (2 * A2 * MathF.Sqrt(distSq));
+            if (cosA < -1f || cosA > 1f)
+            {
+                diagnostic = $"IK失敗[arm]: OC=({ocX:F1},{ocY:F1},{ocZ:F1}) R={R:F1} Rp={Rp:F1} Zp={Zp:F1} cosA={cosA:F4}";
+                return new InverseAnalysis { Success = false, Diagnostic = diagnostic, WristBetaDeg = null, Candidates = [] };
+            }
+
+            float a = MathF.Acos(cosA);
+            float beta = MathF.Atan2(Zp, Rp);
+            bool nearArmSingularity = MathF.Abs(cosA) >= ARM_SINGULAR_COS_THRESHOLD || MathF.Abs(cosD) >= ARM_SINGULAR_COS_THRESHOLD;
+
+            float axis3 = RAD90 - d + alpha;
+            float axis2 = RAD90 - a - beta;
+
+            var ocPosition = Matrix4x4.CreateTranslation(A3_X, 0, A3_Z)
+                           * Matrix4x4.CreateRotationX(RAD90)
+                           * Matrix4x4.CreateRotationZ(-axis3)
+                           * Matrix4x4.CreateTranslation(A2, 0, 0)
+                           * Matrix4x4.CreateRotationZ(-(axis2 - RAD90))
+                           * Matrix4x4.CreateRotationX(RAD90)
+                           * Matrix4x4.CreateTranslation(A1, 0, D1)
+                           * Matrix4x4.CreateRotationZ(-axis1);
+
+            if (!Matrix4x4.Invert(ocPosition, out var ocPositionInv))
+            {
+                diagnostic = $"IK失敗[matrix]: OC=({ocX:F1},{ocY:F1},{ocZ:F1})";
+                return new InverseAnalysis { Success = false, Diagnostic = diagnostic, WristBetaDeg = null, Candidates = [] };
+            }
+
+            var rMatrix = ocPosture * ocPositionInv;
+            CleanMatrix(ref rMatrix);
+
+            float ref1 = refAngles != null && refAngles.Length >= 6 ? refAngles[0] : 0f;
+            float ref2 = refAngles != null && refAngles.Length >= 6 ? refAngles[1] : 0f;
+            float ref3 = refAngles != null && refAngles.Length >= 6 ? refAngles[2] : 0f;
+            float ref4 = refAngles != null && refAngles.Length >= 6 ? refAngles[3] : 0f;
+            float ref5 = refAngles != null && refAngles.Length >= 6 ? refAngles[4] : 0f;
+            float ref6 = refAngles != null && refAngles.Length >= 6 ? refAngles[5] : 0f;
+
+            var euler = EulerZYZ(Matrix4x4.Transpose(rMatrix), -ref4 * DEG2RAD, -ref6 * DEG2RAD);
+            float wristBetaDeg = euler.Y * RAD2DEG;
+            bool nearWristSingularity = MathF.Abs(wristBetaDeg) <= WRIST_SINGULAR_DEG_THRESHOLD
+                || MathF.Abs(wristBetaDeg - 180f) <= WRIST_SINGULAR_DEG_THRESHOLD;
+
+            float a1 = NearestAngle(axis1 * RAD2DEG, ref1);
+            float a2 = NearestAngle(axis2 * RAD2DEG, ref2);
+            float a3 = NearestAngle(axis3 * RAD2DEG, ref3);
+            float a4s1 = NearestAngle(-euler.X * RAD2DEG, ref4);
+            float a5s1 = NearestAngle(-euler.Y * RAD2DEG, ref5);
+            float a6s1 = NearestAngle(-euler.Z * RAD2DEG, ref6);
+            float a4s2 = NearestAngle(-(euler.X + MathF.PI) * RAD2DEG, ref4);
+            float a5s2 = NearestAngle(euler.Y * RAD2DEG, ref5);
+            float a6s2 = NearestAngle(-(euler.Z + MathF.PI) * RAD2DEG, ref6);
+
+            var candidateDeg = new[]
+            {
+                new[] { a1, a2, a3, a4s1, a5s1, a6s1 },
+                new[] { a1, a2, a3, a4s2, a5s2, a6s2 },
+            };
+
+            var candidates = new List<InverseCandidate>();
+            for (int i = 0; i < candidateDeg.Length; i++)
+            {
+                var cand = candidateDeg[i];
+                bool within = IsWithinJointLimits(cand);
+                var mdeg = cand.Select(v => (int)MathF.Round(-v * 1000f)).ToArray();
+                float deviation = MathF.Abs(cand[3] - ref4) + MathF.Abs(cand[4] - ref5) + MathF.Abs(cand[5] - ref6);
+                candidates.Add(new InverseCandidate
+                {
+                    Name = i == 0 ? "sol1" : "sol2",
+                    AnglesDeg = cand.ToArray(),
+                    AnglesMdeg = mdeg,
+                    WithinJointLimits = within,
+                    WristDeviationDeg = deviation,
+                    J4DeviationDeg = MathF.Abs(cand[3] - ref4),
+                });
+            }
+
+            int selectedIndex = -1;
+            float[]? selectedDeg = null;
+            float bestJ4 = float.MaxValue;
+            float bestDev = float.MaxValue;
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                if (!candidates[i].WithinJointLimits)
+                    continue;
+                float j4dev = candidates[i].J4DeviationDeg;
+                float totalDev = candidates[i].WristDeviationDeg;
+                if (j4dev < bestJ4 - 1f || (MathF.Abs(j4dev - bestJ4) <= 1f && totalDev < bestDev))
+                {
+                    bestJ4 = j4dev;
+                    bestDev = totalDev;
+                    selectedIndex = i;
+                    selectedDeg = candidateDeg[i];
+                }
+            }
+
+            if (selectedIndex < 0)
+            {
+                diagnostic = $"IK失敗[limit]: OC=({ocX:F1},{ocY:F1},{ocZ:F1})";
+                return new InverseAnalysis
+                {
+                    Success = false,
+                    Diagnostic = diagnostic,
+                    WristBetaDeg = wristBetaDeg,
+                    NearArmSingularity = nearArmSingularity,
+                    NearWristSingularity = nearWristSingularity,
+                    Candidates = candidates,
+                };
+            }
+
+            if (nearArmSingularity || nearWristSingularity)
+            {
+                diagnostic = $"IK近奇異: OC=({ocX:F1},{ocY:F1},{ocZ:F1}) arm=[{selectedDeg![0]:F1},{selectedDeg[1]:F1},{selectedDeg[2]:F1}] wrist=[{selectedDeg[3]:F1},{selectedDeg[4]:F1},{selectedDeg[5]:F1}]"
+                    + $"{(nearArmSingularity ? " arm" : "")}{(nearWristSingularity ? " wrist" : "")}";
+            }
+
+            return new InverseAnalysis
+            {
+                Success = true,
+                Diagnostic = diagnostic,
+                WristBetaDeg = wristBetaDeg,
+                NearArmSingularity = nearArmSingularity,
+                NearWristSingularity = nearWristSingularity,
+                SelectedCandidateName = candidates[selectedIndex].Name,
+                SelectedAnglesMdeg = candidates[selectedIndex].AnglesMdeg.ToArray(),
+                Candidates = candidates,
+            };
+        }
+
         // ════════════════════════════════════════
         // 輔助方法
         // ════════════════════════════════════════
@@ -409,5 +571,27 @@ namespace Robot.Motion.RA605
                     else if (MathF.Abs(v + 1f) < 1e-6f) m[i, j] = -1f;
                 }
         }
+    }
+
+    public sealed class InverseAnalysis
+    {
+        public bool Success { get; init; }
+        public string? Diagnostic { get; init; }
+        public float? WristBetaDeg { get; init; }
+        public bool NearArmSingularity { get; init; }
+        public bool NearWristSingularity { get; init; }
+        public string? SelectedCandidateName { get; init; }
+        public int[]? SelectedAnglesMdeg { get; init; }
+        public IReadOnlyList<InverseCandidate> Candidates { get; init; } = Array.Empty<InverseCandidate>();
+    }
+
+    public sealed class InverseCandidate
+    {
+        public string Name { get; init; } = "";
+        public float[] AnglesDeg { get; init; } = Array.Empty<float>();
+        public int[] AnglesMdeg { get; init; } = Array.Empty<int>();
+        public bool WithinJointLimits { get; init; }
+        public float WristDeviationDeg { get; init; }
+        public float J4DeviationDeg { get; init; }
     }
 }

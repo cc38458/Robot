@@ -104,6 +104,15 @@ namespace Robot.Core.Interfaces
         bool ChangeVelocity(ushort axis, int newSpeed, double tSec);
 
         /// <summary>
+        /// 立即變更指定軸在 CSP 模式下的目標位置，不經過指令隊列。
+        /// 用於持續追點時切換目前追逐的正/負限位端。
+        /// 前提：AxisCardState == READY，axis ∈ [0,5]
+        /// </summary>
+        /// <param name="axis">軸號（0–5）</param>
+        /// <param name="newTargetMdeg">新的絕對目標位置（mdeg）</param>
+        bool ChangeTargetPosition(ushort axis, int newTargetMdeg);
+
+        /// <summary>
         /// 指定軸以梯形速度曲線移動至絕對位置
         /// 前提：AxisCardState == READY
         /// ⚠ endVel 不為零時，若後續無連續動作命令，驅動會自動補 Sd_Stop

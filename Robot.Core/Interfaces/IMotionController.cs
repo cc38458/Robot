@@ -22,6 +22,44 @@ namespace Robot.Core.Interfaces
         /// </summary>
         Matrix4x4 EndEffectorPosture { get; }
 
+        /// <summary>
+        /// 目前目標姿態對應的六軸角度（mdeg）。
+        /// 持續移動時代表虛擬末端姿態的 IK 結果；非持續移動時回傳目前編碼器角度。
+        /// </summary>
+        int[] TargetJointAngles { get; }
+
+        /// <summary>
+        /// 最近一拍 continuous loop 的目標關節速度（mdeg/s）。
+        /// 若目前不在持續移動模式，回傳零向量。
+        /// </summary>
+        int[] TargetJointSpeedMdegPerSec { get; }
+
+        /// <summary>
+        /// 持續移動控制中的虛擬末端位置 [X, Y, Z]（mm）。
+        /// 若目前不在持續移動模式，回傳目前末端位置。
+        /// </summary>
+        float[] VirtualEndEffectorPosition { get; }
+
+        /// <summary>
+        /// 最近一拍 continuous loop 使用的 tracking slowdown scale。
+        /// </summary>
+        float ContinuousTrackingScale { get; }
+
+        /// <summary>
+        /// 最近一拍 continuous loop 使用的 singular slowdown scale。
+        /// </summary>
+        float ContinuousSingularScale { get; }
+
+        /// <summary>
+        /// 最近一拍 continuous loop 用於累積虛擬末端姿態的 cartesian slowdown scale。
+        /// </summary>
+        float ContinuousCartesianSlowdownScale { get; }
+
+        /// <summary>
+        /// 最近一拍 continuous loop 實際套用到虛擬末端設定點的平移速度 [X, Y, Z]（mm/s）。
+        /// </summary>
+        float[] ContinuousAppliedLinearVelocity { get; }
+
         // ════════════════════════════════════════
         // 末端運動模式
         // ════════════════════════════════════════

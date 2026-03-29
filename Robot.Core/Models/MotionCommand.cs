@@ -96,6 +96,7 @@ namespace Robot.Core.Models
                 CommandType.Stop => $"[Stop] 軸{Axis} 減速{TDec}s",
                 CommandType.MultiAxisPVT => $"[MultiPVT] 6軸同步 {MultiDataCount?[0]}筆",
                 CommandType.VelocityChange => $"[VelChange] 軸{Axis} → {NewTargetSpd} mdeg/s, {TSec}s",
+                CommandType.TargetPositionChange => $"[TargetPosChange] 軸{Axis} → {Dist} mdeg",
                 _ => $"[{Type}] 軸{Axis}",
             };
         }

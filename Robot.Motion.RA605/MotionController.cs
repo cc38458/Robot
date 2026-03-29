@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Numerics;
 using Robot.Core.Enums;
 using Robot.Core.Interfaces;
@@ -15,8 +16,16 @@ namespace Robot.Motion.RA605
         private const int CSP_LOOP_INTERVAL_MS = 100;           // 持續移動控制迴圈週期
         private const float CSP_LOOP_PERIOD_SEC = 0.1f;         // 與上方保持一致（秒）
         private const int CSP_MAX_VEL_STEP_MDEG = 2000;         // 每 100ms 允許的最大速度變化量（mdeg/s）
+        private const float CSP_JOINT_SERVO_KP = 3.0f;          // 外層 joint servo 比例增益（1/s）
+        private const int CSP_JOINT_DEADBAND_MDEG = 80;         // 小於此誤差視為已到位，避免抖動
+        private const int CSP_MAX_CMD_VEL_MDEG = 18_000;        // 外層允許的最大關節命令速度（mdeg/s）
+        private const int CSP_REVERSE_DECEL_STEP_MDEG = 800;    // 未真正反向時，每拍最多減速量（mdeg/s）
+        private const int CSP_TRACKING_SLOWDOWN_START_MDEG = 2_000;
+        private const int CSP_TRACKING_SLOWDOWN_FULL_MDEG = 8_000;
+        private const int IK_UNSOLVED_LOG_INTERVAL = 10;        // IK 無解時每 N 拍記錄一次，避免洗版
+        private const int CSP_DEBUG_SNAPSHOT_INTERVAL = 5;      // 每 N 拍輸出一次 CSP 診斷快照
 
-        // RA605 各軸軟體限位（mdeg）— 進入 CSP 持續模式時，每軸選擇距離當前位置較遠的一端作為目標
+        // RA605 各軸軟體限位（mdeg）— 進入 CSP 持續模式時，依目標關節位置方向選擇目標端
         // 對應 RA605Kinematics.cs 中 JOINT_MIN/JOINT_MAX（單位：度 × 1000）
         private static readonly int[] CSP_JOINT_LIMIT_POS = {  165_000,  85_000, 185_000,  190_000,  115_000,  360_000 };
         private static readonly int[] CSP_JOINT_LIMIT_NEG = { -165_000, -125_000, -55_000, -190_000, -115_000, -360_000 };
@@ -29,6 +38,17 @@ namespace Robot.Motion.RA605
         private volatile bool _continuousRunning;
         private readonly object _continuousLock = new();
         private float _cdx, _cdy, _cdz, _cdYaw, _cdPitch, _cdRoll; // 目標速度向量（由外部設定）
+        private bool _continuousStopRequested;
+        private int[]? _continuousStopTargetMdeg;
+        private Matrix4x4 _continuousVirtualPosture;
+        private bool _continuousVirtualPostureValid;
+        private int[]? _currentTargetJointAngles;
+        private int[] _currentTargetJointSpeedMdegPerSec = new int[AXIS_COUNT];
+        private int[]? _continuousIkReferenceMdeg;
+        private float _lastContinuousTrackingScale = 1f;
+        private float _lastContinuousSingularScale = 1f;
+        private float _lastContinuousCartesianSlowdownScale = 1f;
+        private readonly float[] _lastContinuousAppliedLinearVelocity = new float[3];
 
         // ── 命令位置追蹤 ──
         // 記錄最後一次運動指令的目標角度（mdeg），用於末端相對移動的基準計算
@@ -66,6 +86,103 @@ namespace Robot.Motion.RA605
             {
                 var pos = AxisCard.Pos; // mdeg
                 return _kin.ForwardMdeg(pos);
+            }
+        }
+
+        /// <summary>
+        /// 目前目標姿態對應的六軸角度（mdeg）。
+        /// 持續移動時回傳虛擬末端姿態的 IK 結果；否則退回目前編碼器角度。
+        /// </summary>
+        public int[] TargetJointAngles
+        {
+            get
+            {
+                lock (_continuousLock)
+                {
+                    return _currentTargetJointAngles != null
+                        ? (int[])_currentTargetJointAngles.Clone()
+                        : (int[])AxisCard.Pos.Clone();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 最近一拍 continuous loop 的目標關節速度（mdeg/s）。
+        /// 若目前未處於持續移動，回傳零向量。
+        /// </summary>
+        public int[] TargetJointSpeedMdegPerSec
+        {
+            get
+            {
+                lock (_continuousLock)
+                {
+                    return (int[])_currentTargetJointSpeedMdegPerSec.Clone();
+                }
+            }
+        }
+
+        /// <summary>
+        /// 持續移動控制中的虛擬末端位置 [X, Y, Z]（mm）。
+        /// 若目前沒有有效虛擬姿態，退回目前末端位置。
+        /// </summary>
+        public float[] VirtualEndEffectorPosition
+        {
+            get
+            {
+                lock (_continuousLock)
+                {
+                    return _continuousVirtualPostureValid
+                        ? RA605Kinematics.ExtractPosition(_continuousVirtualPosture)
+                        : EndEffectorPosition;
+                }
+            }
+        }
+
+        /// <summary>最近一拍 continuous loop 使用的 tracking slowdown scale。</summary>
+        public float ContinuousTrackingScale
+        {
+            get
+            {
+                lock (_continuousLock)
+                {
+                    return _lastContinuousTrackingScale;
+                }
+            }
+        }
+
+        /// <summary>最近一拍 continuous loop 使用的 singular slowdown scale。</summary>
+        public float ContinuousSingularScale
+        {
+            get
+            {
+                lock (_continuousLock)
+                {
+                    return _lastContinuousSingularScale;
+                }
+            }
+        }
+
+        /// <summary>最近一拍 continuous loop 用於累積虛擬末端姿態的 cartesian slowdown scale。</summary>
+        public float ContinuousCartesianSlowdownScale
+        {
+            get
+            {
+                lock (_continuousLock)
+                {
+                    return _lastContinuousCartesianSlowdownScale;
+                }
+            }
+        }
+
+        /// <summary>最近一拍 continuous loop 實際套用到虛擬末端設定點的平移速度 [X, Y, Z]（mm/s）。</summary>
+        public float[] ContinuousAppliedLinearVelocity
+        {
+            get
+            {
+                lock (_continuousLock)
+                {
+                    return (float[])_lastContinuousAppliedLinearVelocity.Clone();
+                }
             }
         }
 
@@ -279,15 +396,45 @@ namespace Robot.Motion.RA605
         {
             if (!_continuousRunning) return true;
 
-            _continuousRunning = false;
+            int[] stopTargetMdeg;
+            string stopTargetSource;
+            lock (_continuousLock)
+            {
+                _cdx = 0; _cdy = 0; _cdz = 0;
+                _cdYaw = 0; _cdPitch = 0; _cdRoll = 0;
+
+                var currentMdeg = AxisCard.Pos;
+                if (_continuousVirtualPostureValid)
+                {
+                    var ikRef = _continuousIkReferenceMdeg != null
+                        ? (int[])_continuousIkReferenceMdeg.Clone()
+                        : currentMdeg;
+                    stopTargetMdeg = _kin.InverseMdeg(_continuousVirtualPosture, ikRef, out var stopIkDiag)
+                        ?? currentMdeg;
+                    stopTargetSource = stopTargetMdeg == currentMdeg ? "encoder_fallback" : "virtual_posture";
+                    if (stopTargetMdeg == currentMdeg && !string.IsNullOrEmpty(stopIkDiag))
+                        _log.Warn($"StopContinuousMove：虛擬末端姿態轉停止角度失敗，退回當前編碼器位置 | {stopIkDiag}");
+                }
+                else
+                {
+                    stopTargetMdeg = currentMdeg;
+                    stopTargetSource = "encoder";
+                }
+
+                _continuousStopRequested = true;
+                _continuousStopTargetMdeg = (int[])stopTargetMdeg.Clone();
+                _currentTargetJointAngles = (int[])stopTargetMdeg.Clone();
+                _continuousIkReferenceMdeg = (int[])stopTargetMdeg.Clone();
+            }
+
+            _log.Info($"StopContinuousMove：source={stopTargetSource}, stopTarget=[{FormatMdegArray(stopTargetMdeg)}]");
+
             _continuousThread?.Join(TimeSpan.FromSeconds(2));
             _continuousThread = null;
-
-            // CSP 模式停止：以當前編碼器位置為目標，減速時間 0.3s
-            AxisCard.AbortAndChangePosition(AxisCard.Pos, 0.3);
+            _continuousRunning = false;
 
             // 持續移動停止後同步命令位置
-            SyncCommandedPosition();
+            UpdateCommandedAngles(stopTargetMdeg);
             _log.Info("CSP 持續相對移動已停止");
             return true;
         }
@@ -306,20 +453,55 @@ namespace Robot.Motion.RA605
             // 初始化虛擬末端姿態（從當前編碼器位置計算 FK）
             var initPos = AxisCard.Pos;
             var virtualPosture = _kin.ForwardMdeg(initPos);
+            lock (_continuousLock)
+            {
+                _continuousVirtualPosture = virtualPosture;
+                _continuousVirtualPostureValid = true;
+                _continuousStopRequested = false;
+                _continuousStopTargetMdeg = null;
+                _currentTargetJointAngles = (int[])initPos.Clone();
+                _continuousIkReferenceMdeg = (int[])initPos.Clone();
+                _currentTargetJointSpeedMdegPerSec = new int[AXIS_COUNT];
+                _lastContinuousTrackingScale = 1f;
+                _lastContinuousSingularScale = 1f;
+                _lastContinuousCartesianSlowdownScale = 1f;
+                _lastContinuousAppliedLinearVelocity[0] = 0f;
+                _lastContinuousAppliedLinearVelocity[1] = 0f;
+                _lastContinuousAppliedLinearVelocity[2] = 0f;
+            }
 
             // 每軸前一拍已命令速度（mdeg/s），用於加速度限幅
             var prevVelMdegPerSec = new int[AXIS_COUNT];
+            var prevTargetMdeg = new int[AXIS_COUNT];
+            var hasPrevTargetMdeg = new bool[AXIS_COUNT];
+            var activeLimitTargets = new int[AXIS_COUNT];
+            var desiredVelMdegPerSec = new int[AXIS_COUNT];
+            int ikUnsolvedCount = 0;
+            int loopCount = 0;
 
-            // 進入 CSP 持續模式：每軸選擇距當前位置較遠的軟體限位作為目標
-            // （strVel=0, constVel=1, endVel=1 → 軸以 1 mdeg/s 緩速向限位移動，進入 CSP 等待狀態）
+            // 進入 CSP 持續模式：先預看 0.1s 後的末端目標，依各軸目標方向選擇正/負限位。
+            // （strVel=0, constVel=1, endVel=1 → 軸以 1 mdeg/s 緩速向指定端點移動，進入 CSP 等待狀態）
+            float startDx, startDy, startDz, startYaw, startPitch, startRoll;
+            lock (_continuousLock)
+            {
+                startDx = _cdx; startDy = _cdy; startDz = _cdz;
+                startYaw = _cdYaw; startPitch = _cdPitch; startRoll = _cdRoll;
+            }
+            var initialPreviewPosture = AdvanceVirtualPosture(virtualPosture, startDx, startDy, startDz, startYaw, startPitch, startRoll);
+            var initialTargetMdeg = _kin.InverseMdeg(initialPreviewPosture, initPos, out var initialIkDiag);
+
             for (ushort i = 0; i < AXIS_COUNT; i++)
             {
-                int distToPos = Math.Abs(CSP_JOINT_LIMIT_POS[i] - initPos[i]);
-                int distToNeg = Math.Abs(initPos[i] - CSP_JOINT_LIMIT_NEG[i]);
-                int limitTarget = distToPos >= distToNeg ? CSP_JOINT_LIMIT_POS[i] : CSP_JOINT_LIMIT_NEG[i];
+                int limitTarget = initialTargetMdeg != null
+                    ? SelectCspLimitTarget(i, initPos[i], initialTargetMdeg[i])
+                    : SelectCspLimitTarget(i, initPos[i], initPos[i]);
+
+                activeLimitTargets[i] = limitTarget;
                 AxisCard.MoveAbsolute(i, limitTarget, 0, 1, 1, 0.1, 0.1);
             }
-            _log.Info("CSP 持續模式已進入（各軸正在向較遠軟體限位緩速移動）");
+            if (initialTargetMdeg == null && !string.IsNullOrEmpty(initialIkDiag))
+                _log.Warn($"CSP 持續模式進入時初始預看 IK 無解，先以當前方向預設限位啟動 | {initialIkDiag}");
+            _log.Info("CSP 持續模式已進入（各軸正朝目標方向對應的限位緩速移動）");
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
 
@@ -327,6 +509,8 @@ namespace Robot.Motion.RA605
             {
                 while (_continuousRunning && AxisCard.AxisCardState == CardState.READY)
                 {
+                    loopCount++;
+
                     // ── 1. 讀取目標速度向量 ──────────────────────────────────────
                     float dx, dy, dz, dYaw, dPitch, dRoll;
                     lock (_continuousLock)
@@ -335,19 +519,88 @@ namespace Robot.Motion.RA605
                         dYaw = _cdYaw; dPitch = _cdPitch; dRoll = _cdRoll;
                     }
 
+                    int[]? stopTarget = null;
+                    lock (_continuousLock)
+                    {
+                        if (_continuousStopRequested)
+                        {
+                            stopTarget = _continuousStopTargetMdeg != null
+                                ? (int[])_continuousStopTargetMdeg.Clone()
+                                : (int[])AxisCard.Pos.Clone();
+                        }
+                    }
+                    if (stopTarget != null)
+                    {
+                        _log.Info($"CSP stop request 已進入控制迴圈：target=[{FormatMdegArray(stopTarget)}]");
+                        AxisCard.AbortAndChangePosition(stopTarget, 0.3);
+                        Thread.Sleep(400);
+                        break;
+                    }
+
                     // ── 2. 增量全零：穩定停機 ────────────────────────────────────
                     if (dx == 0 && dy == 0 && dz == 0 &&
                         dYaw == 0 && dPitch == 0 && dRoll == 0)
                     {
-                        AxisCard.AbortAndChangePosition(AxisCard.Pos, 0.3);
+                        var zeroStopCurrentMdeg = AxisCard.Pos;
+                        var zeroStopIkRef = _continuousIkReferenceMdeg != null
+                            ? (int[])_continuousIkReferenceMdeg.Clone()
+                            : zeroStopCurrentMdeg;
+                        var zeroStopTarget = _kin.InverseMdeg(virtualPosture, zeroStopIkRef, out var zeroStopIkDiag)
+                            ?? zeroStopCurrentMdeg;
+                        if (zeroStopTarget == zeroStopCurrentMdeg && !string.IsNullOrEmpty(zeroStopIkDiag))
+                            _log.Warn($"CSP 持續移動：零向量停機退回當前編碼器位置 | {zeroStopIkDiag}");
+
+                        _log.Info($"CSP 零向量停機：target=[{FormatMdegArray(zeroStopTarget)}]");
+                        AxisCard.AbortAndChangePosition(zeroStopTarget, 0.3);
+                        lock (_continuousLock)
+                        {
+                            _currentTargetJointAngles = (int[])zeroStopTarget.Clone();
+                            _continuousIkReferenceMdeg = (int[])zeroStopTarget.Clone();
+                            _currentTargetJointSpeedMdegPerSec = new int[AXIS_COUNT];
+                        }
                         Thread.Sleep(400); // 等待減速完成
                         break;
                     }
 
+                    var currentMdeg = AxisCard.Pos;
+                    int trackingErrorMaxMdeg = 0;
+                    lock (_continuousLock)
+                    {
+                        if (_currentTargetJointAngles != null)
+                        {
+                            for (int i = 0; i < AXIS_COUNT; i++)
+                            {
+                                trackingErrorMaxMdeg = Math.Max(
+                                    trackingErrorMaxMdeg,
+                                    Math.Abs(_currentTargetJointAngles[i] - currentMdeg[i]));
+                            }
+                        }
+                    }
+                    float trackingSlowdown = GetTrackingSlowdownScale(trackingErrorMaxMdeg);
+                    bool pureTranslation = dYaw == 0 && dPitch == 0 && dRoll == 0;
+                    float rawSingularSlowdown;
+                    lock (_continuousLock)
+                    {
+                        rawSingularSlowdown = _lastContinuousSingularScale;
+                    }
+
                     // ── 3. 累積虛擬末端姿態 ──────────────────────────────────────
-                    float newX = virtualPosture.M41 + dx * CSP_LOOP_PERIOD_SEC;
-                    float newY = virtualPosture.M42 + dy * CSP_LOOP_PERIOD_SEC;
-                    float newZ = virtualPosture.M43 + dz * CSP_LOOP_PERIOD_SEC;
+                    // 設定點應只由輸入決定，不應被奇異點/追點保護改寫。
+                    // tracking / singular slowdown 僅保留在 joint servo 速度保護層。
+                    const float cartesianSlowdown = 1f;
+                    float appliedDx = dx;
+                    float appliedDy = dy;
+                    float appliedDz = dz;
+                    lock (_continuousLock)
+                    {
+                        _lastContinuousCartesianSlowdownScale = cartesianSlowdown;
+                        _lastContinuousAppliedLinearVelocity[0] = appliedDx;
+                        _lastContinuousAppliedLinearVelocity[1] = appliedDy;
+                        _lastContinuousAppliedLinearVelocity[2] = appliedDz;
+                    }
+                    float newX = virtualPosture.M41 + appliedDx * CSP_LOOP_PERIOD_SEC;
+                    float newY = virtualPosture.M42 + appliedDy * CSP_LOOP_PERIOD_SEC;
+                    float newZ = virtualPosture.M43 + appliedDz * CSP_LOOP_PERIOD_SEC;
 
                     float yawDeg   = dYaw   * CSP_LOOP_PERIOD_SEC / 1000f;
                     float pitchDeg = dPitch * CSP_LOOP_PERIOD_SEC / 1000f;
@@ -368,31 +621,127 @@ namespace Robot.Motion.RA605
                     virtualPosture.M21 = newRot.M21; virtualPosture.M22 = newRot.M22; virtualPosture.M23 = newRot.M23;
                     virtualPosture.M31 = newRot.M31; virtualPosture.M32 = newRot.M32; virtualPosture.M33 = newRot.M33;
                     virtualPosture.M41 = newX; virtualPosture.M42 = newY; virtualPosture.M43 = newZ;
+                    lock (_continuousLock)
+                    {
+                        _continuousVirtualPosture = virtualPosture;
+                        _continuousVirtualPostureValid = true;
+                    }
 
                     // ── 4. IK 計算目標關節角 ─────────────────────────────────────
-                    var currentMdeg = AxisCard.Pos;
-                    var targetMdeg = _kin.InverseMdeg(virtualPosture, currentMdeg, out var ikDiag);
+                    int[] ikRefMdeg;
+                    lock (_continuousLock)
+                    {
+                        ikRefMdeg = _continuousIkReferenceMdeg != null
+                            ? (int[])_continuousIkReferenceMdeg.Clone()
+                            : (int[])currentMdeg.Clone();
+                    }
+                    var targetMdeg = _kin.InverseMdeg(virtualPosture, ikRefMdeg, out var ikDiag);
                     if (targetMdeg == null)
                     {
-                        _log.Warn($"CSP 持續移動：IK 無解，穩定停機 | {ikDiag ?? "無額外診斷"}");
-                        AxisCard.AbortAndChangePosition(AxisCard.Pos, 0.3);
-                        Thread.Sleep(400);
-                        break;
+                        ikUnsolvedCount++;
+                        if (ikUnsolvedCount == 1 || ikUnsolvedCount % IK_UNSOLVED_LOG_INTERVAL == 0)
+                            _log.Warn($"CSP 持續移動：IK 無解，保留虛擬目標並等待重新進入可解區 | {ikDiag ?? "無額外診斷"}");
+
+                        // IK 暫時無解時不退出持續移動；將關節速度平順收斂到 0，
+                        // 同時保留累積中的虛擬末端姿態，待重新回到可解區後再追上。
+                        for (ushort i = 0; i < AXIS_COUNT; i++)
+                        {
+                            int velChange = -prevVelMdegPerSec[i];
+                            int commandedVel = Math.Abs(velChange) > CSP_MAX_VEL_STEP_MDEG
+                                ? prevVelMdegPerSec[i] + Math.Sign(velChange) * CSP_MAX_VEL_STEP_MDEG
+                                : 0;
+
+                            desiredVelMdegPerSec[i] = 0;
+                            AxisCard.ChangeVelocity(i, Math.Abs(commandedVel), CSP_LOOP_PERIOD_SEC);
+                            prevVelMdegPerSec[i] = commandedVel;
+                        }
+
+                        if (loopCount % CSP_DEBUG_SNAPSHOT_INTERVAL == 0)
+                        {
+                            _log.Debug($"CSP snapshot[unsolved] loop={loopCount} virtualXYZ={FormatCartesian(virtualPosture)} inputV=[{FormatVelocityVector(dx, dy, dz, dYaw, dPitch, dRoll)}] appliedXYZ=[{appliedDx:F3},{appliedDy:F3},{appliedDz:F3} mm/s] trackingScale={trackingSlowdown:F2} prevSingularScale={rawSingularSlowdown:F2} actual=[{FormatMdegArray(currentMdeg)}] cmdVel=[{FormatMdegArray(prevVelMdegPerSec)}]");
+                        }
+
+                        long unsolvedElapsed = sw.ElapsedMilliseconds % CSP_LOOP_INTERVAL_MS;
+                        int unsolvedSleepMs = (int)(CSP_LOOP_INTERVAL_MS - unsolvedElapsed);
+                        if (unsolvedSleepMs > 0) Thread.Sleep(unsolvedSleepMs);
+                        sw.Restart();
+                        continue;
+                    }
+
+                    if (ikUnsolvedCount > 0)
+                    {
+                        _log.Info($"CSP 持續移動：IK 已恢復可解，累積無解拍數={ikUnsolvedCount}");
+                        ikUnsolvedCount = 0;
                     }
                     if (!string.IsNullOrEmpty(ikDiag))
                         _log.Warn($"CSP 持續移動：{ikDiag}");
 
+                    lock (_continuousLock)
+                    {
+                        _currentTargetJointAngles = (int[])targetMdeg.Clone();
+                        _continuousIkReferenceMdeg = (int[])targetMdeg.Clone();
+                    }
+
                     // ── 5. 計算目標速度並套用加速度限幅，發送 ChangeVelocity ─────
+                    float singularSlowdown = GetSingularitySlowdownScale(ikDiag);
+                    lock (_continuousLock)
+                    {
+                        _lastContinuousTrackingScale = trackingSlowdown;
+                        _lastContinuousSingularScale = singularSlowdown;
+                    }
                     for (ushort i = 0; i < AXIS_COUNT; i++)
                     {
-                        int desiredVel = (int)((targetMdeg[i] - currentMdeg[i]) / CSP_LOOP_PERIOD_SEC);
-                        int velChange = desiredVel - prevVelMdegPerSec[i];
-                        int commandedVel = Math.Abs(velChange) > CSP_MAX_VEL_STEP_MDEG
-                            ? prevVelMdegPerSec[i] + Math.Sign(velChange) * CSP_MAX_VEL_STEP_MDEG
-                            : desiredVel;
+                        float axisServoScale = GetAxisServoScale(i, trackingSlowdown, singularSlowdown, ikDiag, pureTranslation);
+                        int servoMaxVelMdeg = Math.Max(3_000, (int)MathF.Round(CSP_MAX_CMD_VEL_MDEG * axisServoScale));
+                        int servoVelStepMdeg = Math.Max(400, (int)MathF.Round(CSP_MAX_VEL_STEP_MDEG * axisServoScale));
+                        int jointError = targetMdeg[i] - currentMdeg[i];
+                        int targetTravel = hasPrevTargetMdeg[i] ? targetMdeg[i] - prevTargetMdeg[i] : 0;
+                        int desiredVel = ComputeServoVelocity(jointError, axisServoScale, servoMaxVelMdeg);
+                        bool targetReversed = hasPrevTargetMdeg[i]
+                            && Math.Sign(targetTravel) != 0
+                            && Math.Sign(targetTravel) != Math.Sign(prevVelMdegPerSec[i]);
+                        bool wouldReverseNow = prevVelMdegPerSec[i] != 0 &&
+                            desiredVel != 0 &&
+                            Math.Sign(desiredVel) != Math.Sign(prevVelMdegPerSec[i]);
 
-                        AxisCard.ChangeVelocity(i, commandedVel, CSP_LOOP_PERIOD_SEC);
+                        int expectedLimitTarget = SelectCspLimitTarget(i, currentMdeg[i], targetMdeg[i]);
+                        if (activeLimitTargets[i] != expectedLimitTarget && (!wouldReverseNow || targetReversed))
+                        {
+                            AxisCard.ChangeTargetPosition(i, expectedLimitTarget);
+                            activeLimitTargets[i] = expectedLimitTarget;
+                        }
+
+                        if (wouldReverseNow && !targetReversed)
+                        {
+                            // 目標點尚未反向，只是目前位置/速度造成誤差跨過零；先平滑減速，不立即反打，也不切換限位端。
+                            desiredVel = DecelerateWithoutReversing(prevVelMdegPerSec[i], axisServoScale);
+                            _log.Debug($"CSP 軸{i + 1} 抑制立即反向：actual={currentMdeg[i]}, target={targetMdeg[i]}, prevVel={prevVelMdegPerSec[i]}, targetTravel={targetTravel}");
+                        }
+
+                        int velChange = desiredVel - prevVelMdegPerSec[i];
+                        int commandedVel = Math.Abs(velChange) > servoVelStepMdeg
+                            ? prevVelMdegPerSec[i] + Math.Sign(velChange) * servoVelStepMdeg
+                            : desiredVel;
+                        commandedVel = Math.Clamp(commandedVel, -servoMaxVelMdeg, servoMaxVelMdeg);
+
+                        desiredVelMdegPerSec[i] = desiredVel;
+                        // 方向由當前追逐的限位端決定，VelocityChange 只送速度大小。
+                        AxisCard.ChangeVelocity(i, Math.Abs(commandedVel), CSP_LOOP_PERIOD_SEC);
                         prevVelMdegPerSec[i] = commandedVel;
+                        prevTargetMdeg[i] = targetMdeg[i];
+                        hasPrevTargetMdeg[i] = true;
+                    }
+                    lock (_continuousLock)
+                    {
+                        _currentTargetJointSpeedMdegPerSec = (int[])desiredVelMdegPerSec.Clone();
+                    }
+
+                    if (loopCount % CSP_DEBUG_SNAPSHOT_INTERVAL == 0)
+                    {
+                        _log.Debug(
+                            $"CSP snapshot loop={loopCount} virtualXYZ={FormatCartesian(virtualPosture)} inputV=[{FormatVelocityVector(dx, dy, dz, dYaw, dPitch, dRoll)}] appliedXYZ=[{appliedDx:F3},{appliedDy:F3},{appliedDz:F3} mm/s] trackingScale={trackingSlowdown:F2} cartesianScale={cartesianSlowdown:F2} prevSingularScale={rawSingularSlowdown:F2} singularScale={singularSlowdown:F2} pureTranslation={pureTranslation} " +
+                            $"actual=[{FormatMdegArray(currentMdeg)}] target=[{FormatMdegArray(targetMdeg)}] desiredVel=[{FormatMdegArray(desiredVelMdegPerSec)}] " +
+                            $"cmdVel=[{FormatMdegArray(prevVelMdegPerSec)}] limit=[{FormatMdegArray(activeLimitTargets)}]");
                     }
 
                     // ── 6. 補償式等待至下一個 100ms 週期 ────────────────────────
@@ -407,9 +756,182 @@ namespace Robot.Motion.RA605
                 _log.Error("CSP 持續移動控制迴圈異常", ex);
                 try { AxisCard.AbortAndChangePosition(AxisCard.Pos, 0.3); } catch { }
             }
+            finally
+            {
+                lock (_continuousLock)
+                {
+                    _continuousStopRequested = false;
+                    _continuousStopTargetMdeg = null;
+                    _continuousVirtualPostureValid = false;
+                    _currentTargetJointAngles = null;
+                    _currentTargetJointSpeedMdegPerSec = new int[AXIS_COUNT];
+                    _continuousIkReferenceMdeg = null;
+                    _lastContinuousTrackingScale = 1f;
+                    _lastContinuousSingularScale = 1f;
+                    _lastContinuousCartesianSlowdownScale = 1f;
+                    _lastContinuousAppliedLinearVelocity[0] = 0f;
+                    _lastContinuousAppliedLinearVelocity[1] = 0f;
+                    _lastContinuousAppliedLinearVelocity[2] = 0f;
+                }
+            }
 
             _log.Info("CSP 持續移動控制迴圈結束");
         }
+
+        private static int SelectCspLimitTarget(int axis, int currentMdeg, int targetMdeg)
+            => targetMdeg >= currentMdeg ? CSP_JOINT_LIMIT_POS[axis] : CSP_JOINT_LIMIT_NEG[axis];
+
+        private static Matrix4x4 AdvanceVirtualPosture(Matrix4x4 posture,
+            float dx, float dy, float dz, float dYaw, float dPitch, float dRoll)
+        {
+            var nextPosture = posture;
+
+            float newX = posture.M41 + dx * CSP_LOOP_PERIOD_SEC;
+            float newY = posture.M42 + dy * CSP_LOOP_PERIOD_SEC;
+            float newZ = posture.M43 + dz * CSP_LOOP_PERIOD_SEC;
+
+            float yawDeg = dYaw * CSP_LOOP_PERIOD_SEC / 1000f;
+            float pitchDeg = dPitch * CSP_LOOP_PERIOD_SEC / 1000f;
+            float rollDeg = dRoll * CSP_LOOP_PERIOD_SEC / 1000f;
+
+            var rotInc = Matrix4x4.CreateRotationZ(yawDeg * MathF.PI / 180f)
+                       * Matrix4x4.CreateRotationY(pitchDeg * MathF.PI / 180f)
+                       * Matrix4x4.CreateRotationX(rollDeg * MathF.PI / 180f);
+
+            var curRot = new Matrix4x4(
+                posture.M11, posture.M12, posture.M13, 0,
+                posture.M21, posture.M22, posture.M23, 0,
+                posture.M31, posture.M32, posture.M33, 0,
+                0, 0, 0, 1);
+            var newRot = rotInc * curRot;
+
+            nextPosture.M11 = newRot.M11; nextPosture.M12 = newRot.M12; nextPosture.M13 = newRot.M13;
+            nextPosture.M21 = newRot.M21; nextPosture.M22 = newRot.M22; nextPosture.M23 = newRot.M23;
+            nextPosture.M31 = newRot.M31; nextPosture.M32 = newRot.M32; nextPosture.M33 = newRot.M33;
+            nextPosture.M41 = newX; nextPosture.M42 = newY; nextPosture.M43 = newZ;
+
+            return nextPosture;
+        }
+
+        private static int ComputeServoVelocity(int jointErrorMdeg, float servoScale, int servoMaxVelMdeg)
+        {
+            if (Math.Abs(jointErrorMdeg) <= CSP_JOINT_DEADBAND_MDEG)
+                return 0;
+
+            int desiredVel = (int)MathF.Round(jointErrorMdeg * CSP_JOINT_SERVO_KP * servoScale);
+            return Math.Clamp(desiredVel, -servoMaxVelMdeg, servoMaxVelMdeg);
+        }
+
+        private static int DecelerateWithoutReversing(int prevVelMdegPerSec, float servoScale)
+        {
+            if (prevVelMdegPerSec == 0)
+                return 0;
+
+            int decelStep = Math.Max(200, (int)MathF.Round(CSP_REVERSE_DECEL_STEP_MDEG * servoScale));
+            return Math.Abs(prevVelMdegPerSec) <= decelStep
+                ? 0
+                : prevVelMdegPerSec - Math.Sign(prevVelMdegPerSec) * decelStep;
+        }
+
+        private static float GetTrackingSlowdownScale(int trackingErrorMaxMdeg)
+        {
+            if (trackingErrorMaxMdeg <= CSP_TRACKING_SLOWDOWN_START_MDEG)
+                return 1f;
+            if (trackingErrorMaxMdeg >= CSP_TRACKING_SLOWDOWN_FULL_MDEG)
+                return 0.25f;
+
+            float ratio = (trackingErrorMaxMdeg - CSP_TRACKING_SLOWDOWN_START_MDEG)
+                / (float)(CSP_TRACKING_SLOWDOWN_FULL_MDEG - CSP_TRACKING_SLOWDOWN_START_MDEG);
+            return 1f - ratio * 0.75f;
+        }
+
+        private static float GetSingularitySlowdownScale(string? ikDiag)
+        {
+            if (string.IsNullOrEmpty(ikDiag))
+                return 1f;
+            bool wristSingular = IsWristSingularityDiagnostic(ikDiag);
+            bool armSingular = IsArmSingularityDiagnostic(ikDiag);
+
+            if (wristSingular && TryExtractWristBetaAbsDeg(ikDiag, out float wristBetaAbsDeg))
+            {
+                if (wristBetaAbsDeg <= 0.5f) return 0.35f;
+                if (wristBetaAbsDeg <= 1.0f) return 0.45f;
+                if (wristBetaAbsDeg <= 2.0f) return 0.60f;
+                if (wristBetaAbsDeg <= 3.0f) return 0.75f;
+                return 0.90f;
+            }
+            if (wristSingular)
+                return 0.60f;
+            if (armSingular)
+                return 0.70f;
+            return 1f;
+        }
+
+        private static float GetAxisServoScale(int axis, float trackingSlowdown, float singularSlowdown, string? ikDiag, bool pureTranslation)
+        {
+            float scale = MathF.Min(trackingSlowdown, singularSlowdown);
+            bool wristSingular = IsWristSingularityDiagnostic(ikDiag);
+            bool armSingular = IsArmSingularityDiagnostic(ikDiag);
+
+            if (!pureTranslation)
+                return scale;
+
+            if (axis <= 2)
+            {
+                if (wristSingular && !armSingular)
+                    return MathF.Min(trackingSlowdown, MathF.Max(singularSlowdown, 0.75f));
+                return scale;
+            }
+
+            if (wristSingular)
+                return scale;
+
+            return MathF.Min(trackingSlowdown, MathF.Max(singularSlowdown, 0.80f));
+        }
+
+        private static bool IsWristSingularityDiagnostic(string? ikDiag)
+            => !string.IsNullOrEmpty(ikDiag)
+                && (ikDiag.EndsWith(" wrist", StringComparison.Ordinal)
+                    || ikDiag.EndsWith(" arm wrist", StringComparison.Ordinal));
+
+        private static bool IsArmSingularityDiagnostic(string? ikDiag)
+            => !string.IsNullOrEmpty(ikDiag)
+                && (ikDiag.EndsWith(" arm", StringComparison.Ordinal)
+                    || ikDiag.EndsWith(" arm wrist", StringComparison.Ordinal));
+
+        private static bool TryExtractWristBetaAbsDeg(string ikDiag, out float wristBetaAbsDeg)
+        {
+            wristBetaAbsDeg = 0f;
+
+            const string marker = "wrist=[";
+            int start = ikDiag.IndexOf(marker, StringComparison.Ordinal);
+            if (start < 0)
+                return false;
+
+            start += marker.Length;
+            int end = ikDiag.IndexOf(']', start);
+            if (end < 0)
+                return false;
+
+            string[] parts = ikDiag[start..end].Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length < 2)
+                return false;
+
+            if (!float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float betaDeg))
+                return false;
+
+            wristBetaAbsDeg = MathF.Abs(betaDeg);
+            return true;
+        }
+
+        private static string FormatMdegArray(int[] values)
+            => string.Join(", ", values.Select(v => (v / 1000f).ToString("F3")));
+
+        private static string FormatVelocityVector(float dx, float dy, float dz, float dYaw, float dPitch, float dRoll)
+            => $"{dx:F3},{dy:F3},{dz:F3} mm/s | {dYaw:F3},{dPitch:F3},{dRoll:F3} mdeg/s";
+
+        private static string FormatCartesian(Matrix4x4 posture)
+            => $"{posture.M41:F3},{posture.M42:F3},{posture.M43:F3}";
 
         // ════════════════════════════════════════
         // 末端一次性相對移動

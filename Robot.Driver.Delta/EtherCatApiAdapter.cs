@@ -65,6 +65,8 @@ namespace Robot.Driver.Delta
 
         /// <summary>變更目標速度。</summary>
         ushort CS_ECAT_Slave_CSP_Velocity_Change(ushort CardNo, ushort NodeID, ushort SlotNo, int NewSpeed, double Tsec);
+        /// <summary>立即變更 CSP 目標位置。</summary>
+        ushort CS_ECAT_Slave_CSP_TargetPos_Change(ushort CardNo, ushort NodeID, ushort SlotNo, int NewPos);
 
         /// <summary>CSP 位移運動（支援絕對/相對）。</summary>
         ushort CS_ECAT_Slave_CSP_Start_Move(ushort CardNo, ushort NodeID, ushort SlotNo,
@@ -143,6 +145,8 @@ namespace Robot.Driver.Delta
 
         /// <inheritdoc />
         public ushort CS_ECAT_Slave_CSP_Velocity_Change(ushort CardNo, ushort NodeID, ushort SlotNo, int NewSpeed, double Tsec) => CEtherCAT_DLL.CS_ECAT_Slave_CSP_Velocity_Change(CardNo, NodeID, SlotNo, NewSpeed, Tsec);
+        /// <inheritdoc />
+        public ushort CS_ECAT_Slave_CSP_TargetPos_Change(ushort CardNo, ushort NodeID, ushort SlotNo, int NewPos) => CEtherCAT_DLL.CS_ECAT_Slave_CSP_TargetPos_Change(CardNo, NodeID, SlotNo, NewPos);
 
         /// <inheritdoc />
         public ushort CS_ECAT_Slave_CSP_Start_Move(ushort CardNo, ushort NodeID, ushort SlotNo, int Dist, int StrVel, int ConstVel, int EndVel, double Tacc, double Tdec, ushort SCurve, ushort IsAbs)
@@ -222,6 +226,8 @@ namespace Robot.Driver.Delta
 
         /// <inheritdoc />
         public ushort CS_ECAT_Slave_CSP_Velocity_Change(ushort CardNo, ushort NodeID, ushort SlotNo, int NewSpeed, double Tsec) => 0; // Mock 直接回傳成功
+        /// <inheritdoc />
+        public ushort CS_ECAT_Slave_CSP_TargetPos_Change(ushort CardNo, ushort NodeID, ushort SlotNo, int NewPos) => 0; // Mock 直接回傳成功
 
         /// <inheritdoc />
         public ushort CS_ECAT_Slave_CSP_Start_Move(ushort CardNo, ushort NodeID, ushort SlotNo, int Dist, int StrVel, int ConstVel, int EndVel, double Tacc, double Tdec, ushort SCurve, ushort IsAbs)

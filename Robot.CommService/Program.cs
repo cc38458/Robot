@@ -30,13 +30,14 @@ namespace Robot.CommService
 
         static int Main(string[] args)
         {
-            // 解析引數：--mock --zero-config=path --shm-path=path
+            // 解析引數：--mock --zero-config=path --shm-path=path --log-level=DEBUG
             bool useMock = args.Contains("--mock");
             string zeroConfig = GetArg(args, "--zero-config") ?? "axis_zero_config.json";
             string shmPath = GetArg(args, "--shm-path")
                 ?? Path.Combine(Path.GetTempPath(), SharedMemoryState.FILE_NAME);
+            var logLevel = ParseLogLevel(GetArg(args, "--log-level"));
 
-            _log = new RobotLogger("CommService");
+            _log = new RobotLogger("CommService", minLevel: logLevel);
 
             _log.Info("═══════════════════════════════════════════");
             _log.Info("  Robot CommService 啟動");
@@ -180,6 +181,8 @@ namespace Robot.CommService
                     "Stop" => _driver!.Stop(req.Axis ?? 0, req.TDec ?? 0.5),
                     "ChangeVelocity" => _driver!.ChangeVelocity(
                         req.Axis ?? 0, req.NewSpeed ?? 0, req.TSec ?? 1.0),
+                    "ChangeTargetPosition" => _driver!.ChangeTargetPosition(
+                        req.Axis ?? 0, req.Dist ?? 0),
                     "MoveAbsolute" => _driver!.MoveAbsolute(
                         req.Axis ?? 0, req.Dist ?? 0, req.StrVel ?? 0,
                         req.ConstVel ?? 0, req.EndVel ?? 0,
@@ -333,6 +336,17 @@ namespace Robot.CommService
             var prefix = key + "=";
             var match = args.FirstOrDefault(a => a.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
             return match?.Substring(prefix.Length);
+        }
+
+        private static LogLevel ParseLogLevel(string? raw)
+        {
+            if (!string.IsNullOrWhiteSpace(raw) &&
+                Enum.TryParse<LogLevel>(raw, ignoreCase: true, out var level))
+            {
+                return level;
+            }
+
+            return LogLevel.INFO;
         }
     }
 }

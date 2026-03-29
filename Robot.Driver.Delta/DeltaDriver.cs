@@ -210,6 +210,17 @@ namespace Robot.Driver.Delta
             });
         }
 
+        public bool ChangeTargetPosition(ushort axis, int newTargetMdeg)
+        {
+            if (!ValidateMotionPrecondition(axis)) return false;
+            return _comm.EnqueueCommand(new MotionCommand
+            {
+                Type = CommandType.TargetPositionChange,
+                Axis = axis,
+                Dist = newTargetMdeg,
+            });
+        }
+
         public bool MoveAbsolute(ushort axis, int dist, int strVel, int constVel,
                                   int endVel, double tAcc, double tDec)
         {

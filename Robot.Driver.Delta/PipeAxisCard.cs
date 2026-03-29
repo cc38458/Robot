@@ -23,6 +23,7 @@ namespace Robot.Driver.Delta
         private readonly string _commServicePath;
         private readonly string _shmPath;
         private readonly string[] _commServiceArgs;
+        private readonly LogLevel _logLevel;
 
         private Process? _commProcess;
         private NamedPipeClientStream? _pipe;
@@ -50,16 +51,19 @@ namespace Robot.Driver.Delta
         /// <param name="useMock">是否使用 Mock 後端</param>
         public PipeAxisCard(RobotLogger logger, string commServicePath,
                             string zeroConfigPath = "axis_zero_config.json",
-                            bool useMock = false)
+                            bool useMock = false,
+                            LogLevel logLevel = LogLevel.INFO)
         {
             _log = logger;
             _commServicePath = commServicePath;
             _shmPath = Path.Combine(Path.GetTempPath(), SharedMemoryState.FILE_NAME);
+            _logLevel = logLevel;
 
             var argList = new List<string>();
             if (useMock) argList.Add("--mock");
             argList.Add($"--zero-config={zeroConfigPath}");
             argList.Add($"--shm-path={_shmPath}");
+            argList.Add($"--log-level={_logLevel}");
             _commServiceArgs = argList.ToArray();
         }
 
@@ -194,6 +198,9 @@ namespace Robot.Driver.Delta
 
         public bool ChangeVelocity(ushort axis, int newSpeed, double tSec)
             => SendCommand(new PipeRequest { Cmd = "ChangeVelocity", Axis = axis, NewSpeed = newSpeed, TSec = tSec });
+
+        public bool ChangeTargetPosition(ushort axis, int newTargetMdeg)
+            => SendCommand(new PipeRequest { Cmd = "ChangeTargetPosition", Axis = axis, Dist = newTargetMdeg });
 
         public bool MoveAbsolute(ushort axis, int dist, int strVel, int constVel,
                                   int endVel, double tAcc, double tDec)

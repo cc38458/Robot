@@ -87,10 +87,13 @@ namespace Robot.Driver.Delta
         private readonly ManualResetEventSlim _calibrateSignal = new(false);
 
         // ── AbortAndChangePosition 請求 ──
+        private enum AbortChangePosPhase { None, Decelerating, FinalSdStopPending }
         private volatile bool _abortChangePosRequested = false;
         private readonly int[] _abortChangePosTargetMdeg = new int[AXIS_COUNT];
         private double _abortChangePosTDec;
         private readonly object _abortChangePosLock = new();
+        private AbortChangePosPhase _abortChangePosPhase = AbortChangePosPhase.None;
+        private long _abortChangePosDeadlineTicks;
 
         // ── 日誌 ──
         private readonly RobotLogger _log;
@@ -288,6 +291,7 @@ namespace Robot.Driver.Delta
                 Array.Copy(targetMdeg, _abortChangePosTargetMdeg, AXIS_COUNT);
                 _abortChangePosTDec = tDec;
                 _abortChangePosRequested = true;
+                _abortChangePosPhase = AbortChangePosPhase.None;
             }
             _log.Info($"收到 AbortAndChangePosition 請求 (tDec={tDec}s)");
         }
@@ -829,8 +833,10 @@ namespace Robot.Driver.Delta
                         continue;
                     }
 
-                    // Stop / VelocityChange 指令可在 MOVING 時執行
-                    if (cmd.Type == CommandType.Stop || cmd.Type == CommandType.VelocityChange)
+                    // Stop / VelocityChange / TargetPositionChange 指令可在 MOVING 時執行
+                    if (cmd.Type == CommandType.Stop ||
+                        cmd.Type == CommandType.VelocityChange ||
+                        cmd.Type == CommandType.TargetPositionChange)
                     {
                         ExecuteCommand(cmd);
                         _queues[i].Dequeue();
@@ -927,6 +933,14 @@ namespace Robot.Driver.Delta
                         MdegPerSecToPulsePerSec(cmd.Axis, cmd.NewTargetSpd), cmd.TSec);
                     _log.DllReturn("CSP_Velocity_Change", ret, $"軸{cmd.Axis} → {cmd.NewTargetSpd} mdeg/s, {cmd.TSec}s");
                     break;
+
+                case CommandType.TargetPositionChange:
+                    {
+                        int targetPulse = MdegToPulse(cmd.Axis, cmd.Dist);
+                        ret = _ecat.CS_ECAT_Slave_CSP_TargetPos_Change(_cardNo, cmd.Axis, 0, targetPulse);
+                        _log.DllReturn("CSP_TargetPos_Change", ret, $"軸{cmd.Axis} → {cmd.Dist} mdeg -> {targetPulse} pulse");
+                        break;
+                    }
             }
         }
 
@@ -1055,35 +1069,77 @@ namespace Robot.Driver.Delta
         }
 
         /// <summary>
-        /// 處理 AbortAndChangePosition 請求：呼叫多軸同步終止並切換至目標位置的 DLL 函式。
+        /// 處理 AbortAndChangePosition 請求。
+        /// 流程：
+        /// 1. 全軸先做 CSP_Velocity_Change(0, tDec)，避免 CSP 速度環殘留。
+        /// 2. 立即呼叫 CSP_Abort_and_Change_Position 切換到指定目標。
+        /// 3. 等待 tDec 後，再補一輪 Sd_Stop 收尾，強制脫離殘留追逐。
         /// </summary>
         private void ProcessAbortAndChangePosition()
         {
-            if (!_abortChangePosRequested) return;
-
             int[] targetMdeg;
             double tDec;
             lock (_abortChangePosLock)
             {
-                if (!_abortChangePosRequested) return;
+                if (!_abortChangePosRequested && _abortChangePosPhase == AbortChangePosPhase.None) return;
                 targetMdeg = (int[])_abortChangePosTargetMdeg.Clone();
                 tDec = _abortChangePosTDec;
-                _abortChangePosRequested = false;
             }
 
-            var nodeIds = new ushort[] { 0, 1, 2, 3, 4, 5 };
-            var slotIds = new ushort[] { 0, 0, 0, 0, 0, 0 };
-            var targetPulse = new int[AXIS_COUNT];
-            for (int i = 0; i < AXIS_COUNT; i++)
-                targetPulse[i] = MdegToPulse(i, targetMdeg[i]);
+            if (_abortChangePosPhase == AbortChangePosPhase.None)
+            {
+                for (ushort i = 0; i < AXIS_COUNT; i++)
+                {
+                    var velRet = _ecat.CS_ECAT_Slave_CSP_Velocity_Change(_cardNo, i, 0, 0, tDec);
+                    _log.DllReturn("CSP_Velocity_Change", velRet, $"AbortPhase 軸{i} → 0 mdeg/s, {tDec}s");
+                }
 
-            int maxVelPulse = MdegPerSecToPulsePerSec(0, 500_000);
+                var nodeIds = new ushort[] { 0, 1, 2, 3, 4, 5 };
+                var slotIds = new ushort[] { 0, 0, 0, 0, 0, 0 };
+                var targetPulse = new int[AXIS_COUNT];
+                for (int i = 0; i < AXIS_COUNT; i++)
+                    targetPulse[i] = MdegToPulse(i, targetMdeg[i]);
 
-            var ret = _ecat.CS_ECAT_Slave_CSP_Abort_and_Change_Position(
-                _cardNo, AXIS_COUNT,
-                ref nodeIds[0], ref slotIds[0], ref targetPulse[0],
-                maxVelPulse, 0, 0.05, tDec, 0);
-            _log.DllReturn("CSP_Abort_and_Change_Position", ret, $"tDec={tDec}s");
+                int maxTargetDeltaMdeg = 1;
+                lock (_stateLock)
+                {
+                    for (int i = 0; i < AXIS_COUNT; i++)
+                        maxTargetDeltaMdeg = Math.Max(maxTargetDeltaMdeg, Math.Abs(targetMdeg[i] - _pos[i]));
+                }
+
+                int maxVelMdegPerSec = Math.Clamp(maxTargetDeltaMdeg * 4, 5_000, 80_000);
+                int maxVelPulse = MdegPerSecToPulsePerSec(0, maxVelMdegPerSec);
+
+                var ret = _ecat.CS_ECAT_Slave_CSP_Abort_and_Change_Position(
+                    _cardNo, AXIS_COUNT,
+                    ref nodeIds[0], ref slotIds[0], ref targetPulse[0],
+                    maxVelPulse, 0, 0.05, tDec, 0);
+                _log.DllReturn("CSP_Abort_and_Change_Position", ret, $"tDec={tDec}s, maxVel={maxVelMdegPerSec} mdeg/s");
+
+                lock (_abortChangePosLock)
+                {
+                    _abortChangePosRequested = false;
+                    _abortChangePosPhase = AbortChangePosPhase.FinalSdStopPending;
+                    _abortChangePosDeadlineTicks = DateTime.UtcNow.Ticks
+                        + (long)((tDec + 0.1) * TimeSpan.TicksPerSecond);
+                }
+                return;
+            }
+
+            if (_abortChangePosPhase == AbortChangePosPhase.FinalSdStopPending
+                && DateTime.UtcNow.Ticks >= _abortChangePosDeadlineTicks)
+            {
+                for (ushort i = 0; i < AXIS_COUNT; i++)
+                {
+                    var ret = _ecat.CS_ECAT_Slave_Motion_Sd_Stop(_cardNo, i, 0, 0.05);
+                    _log.DllReturn("Sd_Stop", ret, $"AbortPhase 軸{i} 最終收尾");
+                }
+
+                lock (_abortChangePosLock)
+                {
+                    _abortChangePosPhase = AbortChangePosPhase.None;
+                }
+            }
         }
 
         /// <summary>對所有軸執行警報復歸（Ralm）並重新 Servo ON。</summary>

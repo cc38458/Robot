@@ -30,7 +30,8 @@ namespace Robot.Driver.Delta
             string zeroConfigPath = "axis_zero_config.json",
             bool useMock = false,
             bool useOutOfProcess = true,
-            string? commServicePath = null)
+            string? commServicePath = null,
+            LogLevel logLevel = LogLevel.INFO)
         {
             if (!useOutOfProcess)
             {
@@ -41,7 +42,7 @@ namespace Robot.Driver.Delta
             // 尋找 CommService 執行檔
             commServicePath ??= FindCommServicePath();
             logger.Info($"AxisCardFactory：建立 Out-of-Process PipeAxisCard（CommService={commServicePath}）");
-            return new PipeAxisCard(logger, commServicePath, zeroConfigPath, useMock);
+            return new PipeAxisCard(logger, commServicePath, zeroConfigPath, useMock, logLevel);
         }
 
         /// <summary>在常見位置尋找 CommService 執行檔。</summary>

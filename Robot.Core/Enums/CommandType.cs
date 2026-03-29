@@ -25,5 +25,8 @@ namespace Robot.Core.Enums
 
         /// <summary>變更移動速度（單軸 CSP Velocity Change）</summary>
         VelocityChange,
+
+        /// <summary>變更目前 CSP 追逐的目標位置（單軸 CSP TargetPos Change）</summary>
+        TargetPositionChange,
     }
 }
