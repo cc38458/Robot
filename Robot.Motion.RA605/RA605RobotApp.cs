@@ -219,6 +219,22 @@ namespace Robot.Motion.RA605
             => _driver.ChangeVelocity(axis, newSpeed, tSec);
 
         /// <summary>
+        /// 變更指定軸在 CSP 模式下的目標位置。
+        /// </summary>
+        /// <param name="axis">軸號（0-5）。</param>
+        /// <param name="newTargetMdeg">新的絕對目標位置（mdeg）。</param>
+        /// <returns>命令送出成功回傳 true，否則 false。</returns>
+        public bool ChangeTargetPosition(ushort axis, int newTargetMdeg)
+            => _driver.ChangeTargetPosition(axis, newTargetMdeg);
+
+        /// <summary>
+        /// 單軸絕對角度移動的低階版本，可指定 endVel 以進入 CSP 追點狀態。
+        /// </summary>
+        public bool MoveAxisAbsoluteRaw(ushort axis, int angleMdeg, int strVel, int constVel,
+                                        int endVel, double tAcc = 0.3, double tDec = 0.3)
+            => _driver.MoveAbsolute(axis, angleMdeg, strVel, constVel, endVel, tAcc, tDec);
+
+        /// <summary>
         /// 單軸絕對角度移動。
         /// </summary>
         /// <param name="axis">軸號（0-5）。</param>
