@@ -28,6 +28,9 @@ namespace Robot.Core.Interfaces
         /// <summary>各軸指令隊列中尚未執行的指令數量</summary>
         int[] QueueLength { get; }
 
+        /// <summary>讀取指定軸目前命令位置（mdeg）。</summary>
+        bool TryGetAxisCommandTriplet(ushort axis, out int commandMdeg, out int actualCommandMdeg, out int targetCommandMdeg);
+
         // ════════════════════════════════════════
         // 連線管理
         // ════════════════════════════════════════

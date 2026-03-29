@@ -26,6 +26,9 @@ namespace Robot.Driver.Delta
         // ── 共享狀態（通訊線程寫入，主線程讀取） ──
         private readonly int[] _pos = new int[AXIS_COUNT];
         private readonly int[] _speed = new int[AXIS_COUNT];
+        private readonly int[] _command = new int[AXIS_COUNT];
+        private readonly int[] _actualCommand = new int[AXIS_COUNT];
+        private readonly int[] _targetCommand = new int[AXIS_COUNT];
         private readonly MotorState[] _state = new MotorState[AXIS_COUNT];
         private readonly int[] _queueLength = new int[AXIS_COUNT];
         private readonly object _stateLock = new();
@@ -138,6 +141,23 @@ namespace Robot.Driver.Delta
                 Array.Copy(_state, state, AXIS_COUNT);
                 Array.Copy(_queueLength, queueLen, AXIS_COUNT);
             }
+        }
+
+        public bool TryGetAxisCommandTriplet(ushort axis, out int commandMdeg, out int actualCommandMdeg, out int targetCommandMdeg)
+        {
+            commandMdeg = 0;
+            actualCommandMdeg = 0;
+            targetCommandMdeg = 0;
+            if (axis >= AXIS_COUNT)
+                return false;
+
+            lock (_stateLock)
+            {
+                commandMdeg = _command[axis];
+                actualCommandMdeg = _actualCommand[axis];
+                targetCommandMdeg = _targetCommand[axis];
+            }
+            return true;
         }
 
         /// <summary>目前軸卡狀態（由通訊線程維護）。</summary>
@@ -687,23 +707,28 @@ namespace Robot.Driver.Delta
 
             for (ushort i = 0; i < AXIS_COUNT; i++)
             {
+                int command = 0, actualCommand = 0, targetCommand = 0;
                 int pos = 0, speed = 0;
                 ushort mdone = 0, statusWord = 0;
 
+                var r0 = _ecat.CS_ECAT_Slave_Motion_Get_Command(_cardNo, i, 0, ref command);
+                var r0a = _ecat.CS_ECAT_Slave_Motion_Get_Actual_Command(_cardNo, i, 0, ref actualCommand);
+                var r0t = _ecat.CS_ECAT_Slave_Motion_Get_Target_Command(_cardNo, i, 0, ref targetCommand);
                 var r1 = _ecat.CS_ECAT_Slave_Motion_Get_Actual_Position(_cardNo, i, 0, ref pos);
                 var r2 = _ecat.CS_ECAT_Slave_Motion_Get_Current_Speed(_cardNo, i, 0, ref speed);
                 var r3 = _ecat.CS_ECAT_Slave_Motion_Get_Mdone(_cardNo, i, 0, ref mdone);
                 var r4 = _ecat.CS_ECAT_Slave_Motion_Get_StatusWord(_cardNo, i, 0, ref statusWord);
 
                 // 逐項檢查：只有成功讀取的項目才更新，失敗項保留上次值
-                int failCount = (r1 != 0 ? 1 : 0) + (r2 != 0 ? 1 : 0)
+                int failCount = (r0 != 0 ? 1 : 0) + (r0a != 0 ? 1 : 0) + (r0t != 0 ? 1 : 0)
+                              + (r1 != 0 ? 1 : 0) + (r2 != 0 ? 1 : 0)
                               + (r3 != 0 ? 1 : 0) + (r4 != 0 ? 1 : 0);
 
                 if (failCount > 0)
                 {
                     _pollErrorCount[i]++;
                     if (_pollErrorCount[i] == 1)
-                        _log.Warn($"軸 {i} 輪詢部分失敗 (ret={r1},{r2},{r3},{r4})");
+                        _log.Warn($"軸 {i} 輪詢部分失敗 (ret={r0},{r0a},{r0t},{r1},{r2},{r3},{r4})");
                     if (_pollErrorCount[i] >= POLL_ERROR_THRESHOLD)
                     {
                         _log.Error($"軸 {i} 連續 {_pollErrorCount[i]} 次輪詢含失敗，觸發全軸安全停止");
@@ -718,6 +743,13 @@ namespace Robot.Driver.Delta
 
                 lock (_stateLock)
                 {
+                    if (r0 == 0)
+                        _command[i] = PulseToMdeg(i, command);
+                    if (r0a == 0)
+                        _actualCommand[i] = PulseToMdeg(i, actualCommand);
+                    if (r0t == 0)
+                        _targetCommand[i] = PulseToMdeg(i, targetCommand);
+
                     // 位置：僅在讀取成功時更新
                     if (r1 == 0)
                         _pos[i] = PulseToMdeg(i, pos);

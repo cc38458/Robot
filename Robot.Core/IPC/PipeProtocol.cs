@@ -33,7 +33,7 @@ namespace Robot.Core.IPC
         /// 指令名稱，對應 IAxisCard 方法名：
         /// Start, End, Initial, Estop, Ralm, Stop, ChangeVelocity,
         /// MoveAbsolute, MoveRelative, MovePV, MovePT, MoveMultiAxisPVT, MoveHome,
-        /// AbortAndChangePosition, ChangeTargetPosition
+        /// AbortAndChangePosition, ChangeTargetPosition, GetAxisCommandTriplet
         /// </summary>
         public string Cmd { get; set; } = "";
 
@@ -78,5 +78,8 @@ namespace Robot.Core.IPC
 
         /// <summary>失敗時的錯誤訊息</summary>
         public string? Error { get; set; }
+
+        /// <summary>可選整數陣列回傳值。</summary>
+        public int[]? IntArray { get; set; }
     }
 }

@@ -45,6 +45,10 @@ namespace Robot.Motion.RA605
         public int[] TargetJointSpeedMdegPerSec => _motion.TargetJointSpeedMdegPerSec;
         /// <summary>最近一拍 continuous loop 真正送出的關節命令速度（mdeg/s）。</summary>
         public int[] CommandedJointSpeedMdegPerSec => _motion.CommandedJointSpeedMdegPerSec;
+        /// <summary>最近一拍 continuous loop 依 target/current 計算出的預期限位端（mdeg）。</summary>
+        public int[] ExpectedLimitTargetsMdeg => _motion.ExpectedLimitTargetsMdeg;
+        /// <summary>最近一拍 continuous loop 實際追逐中的限位端（mdeg）。</summary>
+        public int[] ActiveLimitTargetsMdeg => _motion.ActiveLimitTargetsMdeg;
         /// <summary>持續移動控制中的虛擬末端位置 [X,Y,Z]（mm）。</summary>
         public float[] VirtualEndEffectorPosition => _motion.VirtualEndEffectorPosition;
         /// <summary>最近一拍 continuous loop 的 tracking slowdown scale。</summary>
@@ -226,6 +230,9 @@ namespace Robot.Motion.RA605
         /// <returns>命令送出成功回傳 true，否則 false。</returns>
         public bool ChangeTargetPosition(ushort axis, int newTargetMdeg)
             => _driver.ChangeTargetPosition(axis, newTargetMdeg);
+
+        public bool TryGetAxisCommandTriplet(ushort axis, out int commandMdeg, out int actualCommandMdeg, out int targetCommandMdeg)
+            => _driver.TryGetAxisCommandTriplet(axis, out commandMdeg, out actualCommandMdeg, out targetCommandMdeg);
 
         /// <summary>
         /// 單軸絕對角度移動的低階版本，可指定 endVel 以進入 CSP 追點狀態。

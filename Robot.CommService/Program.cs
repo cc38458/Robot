@@ -183,6 +183,7 @@ namespace Robot.CommService
                         req.Axis ?? 0, req.NewSpeed ?? 0, req.TSec ?? 1.0),
                     "ChangeTargetPosition" => _driver!.ChangeTargetPosition(
                         req.Axis ?? 0, req.Dist ?? 0),
+                    "GetAxisCommandTriplet" => HandleGetAxisCommandTriplet(req, resp),
                     "MoveAbsolute" => _driver!.MoveAbsolute(
                         req.Axis ?? 0, req.Dist ?? 0, req.StrVel ?? 0,
                         req.ConstVel ?? 0, req.EndVel ?? 0,
@@ -223,6 +224,17 @@ namespace Robot.CommService
             }
 
             return resp;
+        }
+
+        private static bool HandleGetAxisCommandTriplet(PipeRequest req, PipeResponse resp)
+        {
+            if (!_driver!.TryGetAxisCommandTriplet(req.Axis ?? 0, out int commandMdeg, out int actualCommandMdeg, out int targetCommandMdeg))
+            {
+                return false;
+            }
+
+            resp.IntArray = [commandMdeg, actualCommandMdeg, targetCommandMdeg];
+            return true;
         }
 
         /// <summary>

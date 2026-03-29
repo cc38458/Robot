@@ -40,21 +40,7 @@ internal static class Program
             Console.WriteLine($"監控頁：{url}");
             Console.WriteLine("請用瀏覽器開啟網址查看手臂狀態（唯讀）。");
         });
-        /*
-        RunStep("3) 原點標定", () =>
-        {
-            if (robot.BackendMode != RobotBackendMode.Mock)
-            {
-                Console.WriteLine("請將手臂移動至機械原點，確認後按 Enter 繼續標定...");
-                Console.ReadLine();
-            }
-            bool ok = robot.CalibrateZero();
-            if (!ok) throw new InvalidOperationException("原點標定失敗");
-            Console.WriteLine(robot.BackendMode == RobotBackendMode.Mock
-                ? "Mock 模式：略過原點標定。"
-                : "原點標定完成，已更新 axis_zero_config.json。");
-        });
-        */
+
         RunStep("4) 第一軸移動到 30 度", () =>
         {
             bool ok = robot.MoveAxisAbsolute(axis: 0, angleMdeg: 10000, constVel: 30000);

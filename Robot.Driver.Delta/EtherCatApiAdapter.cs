@@ -40,7 +40,11 @@ namespace Robot.Driver.Delta
         // ── 狀態讀取 ──
 
         /// <summary>讀取虛擬座標位置。</summary>
-        ushort CS_ECAT_Slave_Motion_Get_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position);
+        ushort CS_ECAT_Slave_Motion_Get_Command(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Command);
+        /// <summary>讀取目前命令位置。</summary>
+        ushort CS_ECAT_Slave_Motion_Get_Actual_Command(ushort CardNo, ushort NodeID, ushort SlotNo, ref int ActualCommand);
+        /// <summary>讀取目前目標命令位置。</summary>
+        ushort CS_ECAT_Slave_Motion_Get_Target_Command(ushort CardNo, ushort NodeID, ushort SlotNo, ref int TargetCommand);
         /// <summary>讀取實際編碼器位置。</summary>
         ushort CS_ECAT_Slave_Motion_Get_Actual_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position);
         /// <summary>讀取目前速度。</summary>
@@ -124,9 +128,13 @@ namespace Robot.Driver.Delta
         public ushort CS_ECAT_Slave_Motion_Set_Svon(ushort CardNo, ushort NodeID, ushort SlotNo, ushort On_Off) => CEtherCAT_DLL.CS_ECAT_Slave_Motion_Set_Svon(CardNo, NodeID, SlotNo, On_Off);
 
         /// <inheritdoc />
-        public ushort CS_ECAT_Slave_Motion_Get_Actual_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position) => CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Actual_Position(CardNo, NodeID, SlotNo, ref Position);
+        public ushort CS_ECAT_Slave_Motion_Get_Command(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Command) => CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Command(CardNo, NodeID, SlotNo, ref Command);
         /// <inheritdoc />
-        public ushort CS_ECAT_Slave_Motion_Get_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position) => CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Position(CardNo, NodeID, SlotNo, ref Position);
+        public ushort CS_ECAT_Slave_Motion_Get_Actual_Command(ushort CardNo, ushort NodeID, ushort SlotNo, ref int ActualCommand) => CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Actual_Command(CardNo, NodeID, SlotNo, ref ActualCommand);
+        /// <inheritdoc />
+        public ushort CS_ECAT_Slave_Motion_Get_Target_Command(ushort CardNo, ushort NodeID, ushort SlotNo, ref int TargetCommand) => CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Target_Command(CardNo, NodeID, SlotNo, ref TargetCommand);
+        /// <inheritdoc />
+        public ushort CS_ECAT_Slave_Motion_Get_Actual_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position) => CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Actual_Position(CardNo, NodeID, SlotNo, ref Position);
         /// <inheritdoc />
         public ushort CS_ECAT_Slave_Motion_Get_Current_Speed(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Speed) => CEtherCAT_DLL.CS_ECAT_Slave_Motion_Get_Current_Speed(CardNo, NodeID, SlotNo, ref Speed);
         /// <inheritdoc />
@@ -205,7 +213,11 @@ namespace Robot.Driver.Delta
         public ushort CS_ECAT_Slave_Motion_Set_Svon(ushort CardNo, ushort NodeID, ushort SlotNo, ushort On_Off) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Set_Svon(CardNo, NodeID, SlotNo, On_Off);
 
         /// <inheritdoc />
-        public ushort CS_ECAT_Slave_Motion_Get_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Get_Position(CardNo, NodeID, SlotNo, ref Position);
+        public ushort CS_ECAT_Slave_Motion_Get_Command(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Command) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Get_Command(CardNo, NodeID, SlotNo, ref Command);
+        /// <inheritdoc />
+        public ushort CS_ECAT_Slave_Motion_Get_Actual_Command(ushort CardNo, ushort NodeID, ushort SlotNo, ref int ActualCommand) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Get_Actual_Command(CardNo, NodeID, SlotNo, ref ActualCommand);
+        /// <inheritdoc />
+        public ushort CS_ECAT_Slave_Motion_Get_Target_Command(ushort CardNo, ushort NodeID, ushort SlotNo, ref int TargetCommand) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Get_Target_Command(CardNo, NodeID, SlotNo, ref TargetCommand);
         /// <inheritdoc />
         public ushort CS_ECAT_Slave_Motion_Get_Actual_Position(ushort CardNo, ushort NodeID, ushort SlotNo, ref int Position) => CEtherCAT_Mock.CS_ECAT_Slave_Motion_Get_Actual_Position(CardNo, NodeID, SlotNo, ref Position);
         /// <inheritdoc />

@@ -41,6 +41,16 @@ namespace Robot.Core.Interfaces
         int[] CommandedJointSpeedMdegPerSec { get; }
 
         /// <summary>
+        /// 最近一拍 continuous loop 依 target/current 計算出的每軸預期限位端（mdeg）。
+        /// </summary>
+        int[] ExpectedLimitTargetsMdeg { get; }
+
+        /// <summary>
+        /// 最近一拍 continuous loop 實際正在追逐的每軸限位端（mdeg）。
+        /// </summary>
+        int[] ActiveLimitTargetsMdeg { get; }
+
+        /// <summary>
         /// 持續移動控制中的虛擬末端位置 [X, Y, Z]（mm）。
         /// 若目前不在持續移動模式，回傳目前末端位置。
         /// </summary>

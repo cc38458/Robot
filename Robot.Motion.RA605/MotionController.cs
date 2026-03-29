@@ -28,6 +28,14 @@ namespace Robot.Motion.RA605
         private const int CSP_FINALIZE_MOVE_TACC_MS = 100;
         private const int CSP_FINALIZE_MOVE_TDEC_MS = 200;
         private const int CSP_FINALIZE_WAIT_TIMEOUT_MS = 3000;
+        private const int CSP_UNEXPECTED_STOP_RESEND_INTERVAL_LOOPS = 3;
+        private const int CSP_UNEXPECTED_STOP_RESEND_MIN_ERR_MDEG = 300;
+        private const int CSP_UNEXPECTED_STOP_RESEND_MIN_CMD_VEL_MDEG = 300;
+        private const int CSP_STALL_DETECT_MIN_EXPECTED_MOVE_MDEG = 120;
+        private const int CSP_STALL_DETECT_MIN_ACTUAL_MOVE_MDEG = 40;
+        private const float CSP_STALL_DETECT_MOVE_RATIO = 0.2f;
+        private const int CSP_STALL_DETECT_CONSECUTIVE_LOOPS = 3;
+        private const int CSP_J2_EXPERIMENTAL_MIN_CMD_VEL_MDEG = 1_000;
 
         // RA605 各軸軟體限位（mdeg）— 進入 CSP 持續模式時，依目標關節位置方向選擇目標端
         // 對應 RA605Kinematics.cs 中 JOINT_MIN/JOINT_MAX（單位：度 × 1000）
@@ -49,6 +57,8 @@ namespace Robot.Motion.RA605
         private int[]? _currentTargetJointAngles;
         private int[] _currentTargetJointSpeedMdegPerSec = new int[AXIS_COUNT];
         private int[] _currentCommandedJointSpeedMdegPerSec = new int[AXIS_COUNT];
+        private int[] _currentExpectedLimitTargets = new int[AXIS_COUNT];
+        private int[] _currentActiveLimitTargets = new int[AXIS_COUNT];
         private int[]? _continuousIkReferenceMdeg;
         private float _lastContinuousTrackingScale = 1f;
         private float _lastContinuousSingularScale = 1f;
@@ -137,6 +147,28 @@ namespace Robot.Motion.RA605
                 lock (_continuousLock)
                 {
                     return (int[])_currentCommandedJointSpeedMdegPerSec.Clone();
+                }
+            }
+        }
+
+        public int[] ExpectedLimitTargetsMdeg
+        {
+            get
+            {
+                lock (_continuousLock)
+                {
+                    return (int[])_currentExpectedLimitTargets.Clone();
+                }
+            }
+        }
+
+        public int[] ActiveLimitTargetsMdeg
+        {
+            get
+            {
+                lock (_continuousLock)
+                {
+                    return (int[])_currentActiveLimitTargets.Clone();
                 }
             }
         }
@@ -483,6 +515,8 @@ namespace Robot.Motion.RA605
                 _continuousIkReferenceMdeg = (int[])initPos.Clone();
                 _currentTargetJointSpeedMdegPerSec = new int[AXIS_COUNT];
                 _currentCommandedJointSpeedMdegPerSec = new int[AXIS_COUNT];
+                _currentExpectedLimitTargets = new int[AXIS_COUNT];
+                _currentActiveLimitTargets = new int[AXIS_COUNT];
                 _lastContinuousTrackingScale = 1f;
                 _lastContinuousSingularScale = 1f;
                 _lastContinuousCartesianSlowdownScale = 1f;
@@ -494,9 +528,12 @@ namespace Robot.Motion.RA605
             // 每軸前一拍已命令速度（mdeg/s），用於加速度限幅
             var prevVelMdegPerSec = new int[AXIS_COUNT];
             var prevTargetMdeg = new int[AXIS_COUNT];
+            var prevActualMdeg = (int[])initPos.Clone();
             var hasPrevTargetMdeg = new bool[AXIS_COUNT];
             var activeLimitTargets = new int[AXIS_COUNT];
             var desiredVelMdegPerSec = new int[AXIS_COUNT];
+            var lastUnexpectedStopResendLoop = new int[AXIS_COUNT];
+            var stalledLoopCounts = new int[AXIS_COUNT];
             int ikUnsolvedCount = 0;
             int loopCount = 0;
 
@@ -519,6 +556,11 @@ namespace Robot.Motion.RA605
 
                 activeLimitTargets[i] = limitTarget;
                 AxisCard.MoveAbsolute(i, limitTarget, 0, 1, 1, 0.1, 0.1);
+            }
+            lock (_continuousLock)
+            {
+                _currentExpectedLimitTargets = (int[])activeLimitTargets.Clone();
+                _currentActiveLimitTargets = (int[])activeLimitTargets.Clone();
             }
             if (initialTargetMdeg == null && !string.IsNullOrEmpty(initialIkDiag))
                 _log.Warn($"CSP 持續模式進入時初始預看 IK 無解，先以當前方向預設限位啟動 | {initialIkDiag}");
@@ -729,6 +771,7 @@ namespace Robot.Motion.RA605
                             Math.Sign(desiredVel) != Math.Sign(prevVelMdegPerSec[i]);
 
                         int expectedLimitTarget = SelectCspLimitTarget(i, currentMdeg[i], targetMdeg[i]);
+                        _currentExpectedLimitTargets[i] = expectedLimitTarget;
                         if (activeLimitTargets[i] != expectedLimitTarget && (!wouldReverseNow || targetReversed))
                         {
                             AxisCard.ChangeTargetPosition(i, expectedLimitTarget);
@@ -748,17 +791,74 @@ namespace Robot.Motion.RA605
                             : desiredVel;
                         commandedVel = Math.Clamp(commandedVel, -servoMaxVelMdeg, servoMaxVelMdeg);
 
+                        if (i == 1 &&
+                            commandedVel != 0 &&
+                            Math.Abs(jointError) >= CSP_UNEXPECTED_STOP_RESEND_MIN_ERR_MDEG &&
+                            Math.Abs(commandedVel) < CSP_J2_EXPERIMENTAL_MIN_CMD_VEL_MDEG)
+                        {
+                            commandedVel = Math.Sign(commandedVel) * CSP_J2_EXPERIMENTAL_MIN_CMD_VEL_MDEG;
+                        }
+
+                        int expectedMoveMdeg = (int)Math.Round(Math.Abs(commandedVel) * CSP_LOOP_PERIOD_SEC);
+                        int actualMoveMdeg = Math.Abs(currentMdeg[i] - prevActualMdeg[i]);
+                        int actualMoveThresholdMdeg = Math.Max(
+                            CSP_STALL_DETECT_MIN_ACTUAL_MOVE_MDEG,
+                            (int)Math.Round(expectedMoveMdeg * CSP_STALL_DETECT_MOVE_RATIO));
+                        bool stalledByPosition =
+                            Math.Abs(jointError) >= CSP_UNEXPECTED_STOP_RESEND_MIN_ERR_MDEG &&
+                            Math.Abs(commandedVel) >= CSP_UNEXPECTED_STOP_RESEND_MIN_CMD_VEL_MDEG &&
+                            expectedMoveMdeg >= CSP_STALL_DETECT_MIN_EXPECTED_MOVE_MDEG &&
+                            actualMoveMdeg <= actualMoveThresholdMdeg;
+                        stalledLoopCounts[i] = stalledByPosition ? stalledLoopCounts[i] + 1 : 0;
+
+                        bool unexpectedStop =
+                            AxisCard.State[i] == MotorState.STOP &&
+                            Math.Abs(jointError) >= CSP_UNEXPECTED_STOP_RESEND_MIN_ERR_MDEG &&
+                            Math.Abs(commandedVel) >= CSP_UNEXPECTED_STOP_RESEND_MIN_CMD_VEL_MDEG;
+
+                        bool shouldResendAbsMove =
+                            (unexpectedStop ||
+                             stalledLoopCounts[i] >= CSP_STALL_DETECT_CONSECUTIVE_LOOPS) &&
+                            loopCount - lastUnexpectedStopResendLoop[i] >= CSP_UNEXPECTED_STOP_RESEND_INTERVAL_LOOPS;
+
+                        if (shouldResendAbsMove)
+                        {
+                            bool resent = AxisCard.MoveAbsolute(
+                                i,
+                                expectedLimitTarget,
+                                0,
+                                1,
+                                1,
+                                0.1,
+                                0.1);
+                            if (resent)
+                            {
+                                lastUnexpectedStopResendLoop[i] = loopCount;
+                                stalledLoopCounts[i] = 0;
+                                activeLimitTargets[i] = expectedLimitTarget;
+                                _log.Warn(
+                                    $"CSP 軸{i + 1} 偵測到 AbsMove 意外結束或位置停滯，依目標側重送 MoveAbsolute：limit={expectedLimitTarget / 1000f:F3}°, " +
+                                    $"actual={currentMdeg[i] / 1000f:F3}°, target={targetMdeg[i] / 1000f:F3}°, cmdVel={commandedVel / 1000f:F3}°/s, expectedMove={expectedMoveMdeg / 1000f:F3}°, actualMove={actualMoveMdeg / 1000f:F3}°, stalledLoops={stalledLoopCounts[i]}");
+                            }
+                            else
+                            {
+                                _log.Warn($"CSP 軸{i + 1} 意外 STOP 後重送 MoveAbsolute 失敗");
+                            }
+                        }
+
                         desiredVelMdegPerSec[i] = desiredVel;
                         // 方向由當前追逐的限位端決定，VelocityChange 只送速度大小。
                         AxisCard.ChangeVelocity(i, Math.Abs(commandedVel), CSP_LOOP_PERIOD_SEC);
                         prevVelMdegPerSec[i] = commandedVel;
                         prevTargetMdeg[i] = targetMdeg[i];
                         hasPrevTargetMdeg[i] = true;
+                        prevActualMdeg[i] = currentMdeg[i];
                     }
                     lock (_continuousLock)
                     {
                         _currentTargetJointSpeedMdegPerSec = (int[])desiredVelMdegPerSec.Clone();
                         _currentCommandedJointSpeedMdegPerSec = (int[])prevVelMdegPerSec.Clone();
+                        _currentActiveLimitTargets = (int[])activeLimitTargets.Clone();
                     }
 
                     if (loopCount % CSP_DEBUG_SNAPSHOT_INTERVAL == 0)
@@ -796,6 +896,8 @@ namespace Robot.Motion.RA605
                     _currentTargetJointAngles = null;
                     _currentTargetJointSpeedMdegPerSec = new int[AXIS_COUNT];
                     _currentCommandedJointSpeedMdegPerSec = new int[AXIS_COUNT];
+                    _currentExpectedLimitTargets = new int[AXIS_COUNT];
+                    _currentActiveLimitTargets = new int[AXIS_COUNT];
                     _continuousIkReferenceMdeg = null;
                     _lastContinuousTrackingScale = 1f;
                     _lastContinuousSingularScale = 1f;

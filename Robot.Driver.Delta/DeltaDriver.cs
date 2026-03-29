@@ -52,6 +52,8 @@ namespace Robot.Driver.Delta
         public MotorState[] State { get { RefreshState(); return (MotorState[])_state.Clone(); } }
         public CardState AxisCardState { get { RefreshState(); return _cardState; } }
         public int[] QueueLength { get { RefreshState(); return (int[])_queueLength.Clone(); } }
+        public bool TryGetAxisCommandTriplet(ushort axis, out int commandMdeg, out int actualCommandMdeg, out int targetCommandMdeg)
+            => _comm.TryGetAxisCommandTriplet(axis, out commandMdeg, out actualCommandMdeg, out targetCommandMdeg);
 
         /// <summary>從 CommThread 取得最新的軸狀態快照並更新本地快取。</summary>
         private void RefreshState()

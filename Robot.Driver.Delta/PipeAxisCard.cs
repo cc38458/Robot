@@ -79,6 +79,23 @@ namespace Robot.Driver.Delta
         public MotorState[] State { get { RefreshFromShm(); return (MotorState[])_state.Clone(); } }
         public CardState AxisCardState { get { RefreshFromShm(); return _cardState; } }
         public int[] QueueLength { get { RefreshFromShm(); return (int[])_queueLength.Clone(); } }
+        public bool TryGetAxisCommandTriplet(ushort axis, out int commandMdeg, out int actualCommandMdeg, out int targetCommandMdeg)
+        {
+            commandMdeg = 0;
+            actualCommandMdeg = 0;
+            targetCommandMdeg = 0;
+            if (_commServiceDead)
+                return false;
+
+            var response = SendCommandForResponse(new PipeRequest { Cmd = "GetAxisCommandTriplet", Axis = axis });
+            if (response?.Ok != true || response.IntArray == null || response.IntArray.Length < 3)
+                return false;
+
+            commandMdeg = response.IntArray[0];
+            actualCommandMdeg = response.IntArray[1];
+            targetCommandMdeg = response.IntArray[2];
+            return true;
+        }
 
         /// <summary>從共享記憶體更新狀態快取。若 CommService 崩潰則回報 ALARM。</summary>
         private void RefreshFromShm()
@@ -260,11 +277,14 @@ namespace Robot.Driver.Delta
 
         /// <summary>透過管道發送指令並等待回應。</summary>
         private bool SendCommand(PipeRequest request)
+            => SendCommandForResponse(request)?.Ok == true;
+
+        private PipeResponse? SendCommandForResponse(PipeRequest request)
         {
             if (_commServiceDead)
             {
                 _log.Warn($"CommService 已崩潰，拒絕指令 {request.Cmd}");
-                return false;
+                return null;
             }
 
             lock (_pipeLock)
@@ -274,7 +294,7 @@ namespace Robot.Driver.Delta
                     if (_writer == null || _reader == null)
                     {
                         _log.Warn("管道尚未建立");
-                        return false;
+                        return null;
                     }
 
                     _writer.WriteLine(PipeProtocol.Serialize(request));
@@ -284,31 +304,31 @@ namespace Robot.Driver.Delta
                     {
                         _log.Error("管道讀取失敗（CommService 可能已終止）");
                         _commServiceDead = true;
-                        return false;
+                        return null;
                     }
 
                     var response = PipeProtocol.Deserialize<PipeResponse>(responseLine);
                     if (response == null)
                     {
                         _log.Error("無法解析管道回應");
-                        return false;
+                        return null;
                     }
 
                     if (!response.Ok)
                         _log.Warn($"指令 {request.Cmd} 失敗：{response.Error}");
 
-                    return response.Ok;
+                    return response;
                 }
                 catch (IOException ex)
                 {
                     _log.Error($"管道通訊錯誤：{ex.Message}");
                     _commServiceDead = true;
-                    return false;
+                    return null;
                 }
                 catch (Exception ex)
                 {
                     _log.Error($"SendCommand 異常", ex);
-                    return false;
+                    return null;
                 }
             }
         }
