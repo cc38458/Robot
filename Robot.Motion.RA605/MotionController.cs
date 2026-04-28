@@ -28,13 +28,15 @@ namespace Robot.Motion.RA605
         private const int CSP_FINALIZE_MOVE_TACC_MS = 100;
         private const int CSP_FINALIZE_MOVE_TDEC_MS = 200;
         private const int CSP_FINALIZE_WAIT_TIMEOUT_MS = 3000;
-        private const int CSP_UNEXPECTED_STOP_RESEND_INTERVAL_LOOPS = 3;
-        private const int CSP_UNEXPECTED_STOP_RESEND_MIN_ERR_MDEG = 300;
-        private const int CSP_UNEXPECTED_STOP_RESEND_MIN_CMD_VEL_MDEG = 300;
-        private const int CSP_STALL_DETECT_MIN_EXPECTED_MOVE_MDEG = 120;
-        private const int CSP_STALL_DETECT_MIN_ACTUAL_MOVE_MDEG = 40;
-        private const float CSP_STALL_DETECT_MOVE_RATIO = 0.2f;
-        private const int CSP_STALL_DETECT_CONSECUTIVE_LOOPS = 3;
+        private const int CSP_STALL_MIN_ERR_MDEG = 1_000;
+        private const int CSP_STALL_MIN_CMD_VEL_MDEG = 3_000;
+        private const int CSP_STALL_MAX_ACTUAL_VEL_MDEG = 200;
+        private const int CSP_STALL_DETECT_CONSECUTIVE_LOOPS = 1;
+        private const int CSP_LIMIT_SWITCH_MIN_ERR_MDEG = 2_000;
+        private const int CSP_LIMIT_SWITCH_CONFIRM_LOOPS = 1;
+        private const int CSP_LIMIT_SWITCH_COOLDOWN_LOOPS = 1;
+        private const int CSP_STALL_REARM_DELAY_LOOPS = 1;
+        private const int CSP_STALL_REARM_COOLDOWN_LOOPS = 2;
         private const int CSP_J2_EXPERIMENTAL_MIN_CMD_VEL_MDEG = 1_000;
 
         // RA605 各軸軟體限位（mdeg）— 進入 CSP 持續模式時，依目標關節位置方向選擇目標端
@@ -528,12 +530,18 @@ namespace Robot.Motion.RA605
             // 每軸前一拍已命令速度（mdeg/s），用於加速度限幅
             var prevVelMdegPerSec = new int[AXIS_COUNT];
             var prevTargetMdeg = new int[AXIS_COUNT];
-            var prevActualMdeg = (int[])initPos.Clone();
             var hasPrevTargetMdeg = new bool[AXIS_COUNT];
             var activeLimitTargets = new int[AXIS_COUNT];
             var desiredVelMdegPerSec = new int[AXIS_COUNT];
-            var lastUnexpectedStopResendLoop = new int[AXIS_COUNT];
             var stalledLoopCounts = new int[AXIS_COUNT];
+            var stallActive = new bool[AXIS_COUNT];
+            var stallRecoveredByMotion = new bool[AXIS_COUNT];
+            var stallAutoRearmIssued = new bool[AXIS_COUNT];
+            var lastLimitSwitchLoop = new int[AXIS_COUNT];
+            var lastRearmLoop = new int[AXIS_COUNT];
+            var stallDetectedLoop = new int[AXIS_COUNT];
+            var pendingDirectionSign = new int[AXIS_COUNT];
+            var pendingDirectionStableLoops = new int[AXIS_COUNT];
             int ikUnsolvedCount = 0;
             int loopCount = 0;
 
@@ -763,6 +771,10 @@ namespace Robot.Motion.RA605
                         int jointError = targetMdeg[i] - currentMdeg[i];
                         int targetTravel = hasPrevTargetMdeg[i] ? targetMdeg[i] - prevTargetMdeg[i] : 0;
                         int desiredVel = ComputeServoVelocity(jointError, axisServoScale, servoMaxVelMdeg);
+                        int currentDirectionSign = GetLimitDirectionSign(i, activeLimitTargets[i]);
+                        int desiredDirectionSign = Math.Abs(jointError) <= CSP_JOINT_DEADBAND_MDEG
+                            ? currentDirectionSign
+                            : Math.Sign(jointError);
                         bool targetReversed = hasPrevTargetMdeg[i]
                             && Math.Sign(targetTravel) != 0
                             && Math.Sign(targetTravel) != Math.Sign(prevVelMdegPerSec[i]);
@@ -770,12 +782,24 @@ namespace Robot.Motion.RA605
                             desiredVel != 0 &&
                             Math.Sign(desiredVel) != Math.Sign(prevVelMdegPerSec[i]);
 
-                        int expectedLimitTarget = SelectCspLimitTarget(i, currentMdeg[i], targetMdeg[i]);
+                        UpdatePendingDirection(pendingDirectionSign, pendingDirectionStableLoops, i, desiredDirectionSign);
+                        int expectedLimitTarget = desiredDirectionSign >= 0 ? CSP_JOINT_LIMIT_POS[i] : CSP_JOINT_LIMIT_NEG[i];
                         _currentExpectedLimitTargets[i] = expectedLimitTarget;
-                        if (activeLimitTargets[i] != expectedLimitTarget && (!wouldReverseNow || targetReversed))
+                        bool freezeDirectionSwitching = stallActive[i];
+                        bool shouldSwitchLimit =
+                            !freezeDirectionSwitching &&
+                            desiredDirectionSign != currentDirectionSign &&
+                            Math.Abs(jointError) >= CSP_LIMIT_SWITCH_MIN_ERR_MDEG &&
+                            pendingDirectionStableLoops[i] >= CSP_LIMIT_SWITCH_CONFIRM_LOOPS &&
+                            loopCount - lastLimitSwitchLoop[i] >= CSP_LIMIT_SWITCH_COOLDOWN_LOOPS &&
+                            (!wouldReverseNow || targetReversed);
+                        if (shouldSwitchLimit)
                         {
                             AxisCard.ChangeTargetPosition(i, expectedLimitTarget);
                             activeLimitTargets[i] = expectedLimitTarget;
+                            currentDirectionSign = desiredDirectionSign;
+                            lastLimitSwitchLoop[i] = loopCount;
+                            pendingDirectionStableLoops[i] = 0;
                         }
 
                         if (wouldReverseNow && !targetReversed)
@@ -793,57 +817,70 @@ namespace Robot.Motion.RA605
 
                         if (i == 1 &&
                             commandedVel != 0 &&
-                            Math.Abs(jointError) >= CSP_UNEXPECTED_STOP_RESEND_MIN_ERR_MDEG &&
+                            Math.Abs(jointError) >= CSP_STALL_MIN_ERR_MDEG &&
                             Math.Abs(commandedVel) < CSP_J2_EXPERIMENTAL_MIN_CMD_VEL_MDEG)
                         {
                             commandedVel = Math.Sign(commandedVel) * CSP_J2_EXPERIMENTAL_MIN_CMD_VEL_MDEG;
                         }
 
-                        int expectedMoveMdeg = (int)Math.Round(Math.Abs(commandedVel) * CSP_LOOP_PERIOD_SEC);
-                        int actualMoveMdeg = Math.Abs(currentMdeg[i] - prevActualMdeg[i]);
-                        int actualMoveThresholdMdeg = Math.Max(
-                            CSP_STALL_DETECT_MIN_ACTUAL_MOVE_MDEG,
-                            (int)Math.Round(expectedMoveMdeg * CSP_STALL_DETECT_MOVE_RATIO));
-                        bool stalledByPosition =
-                            Math.Abs(jointError) >= CSP_UNEXPECTED_STOP_RESEND_MIN_ERR_MDEG &&
-                            Math.Abs(commandedVel) >= CSP_UNEXPECTED_STOP_RESEND_MIN_CMD_VEL_MDEG &&
-                            expectedMoveMdeg >= CSP_STALL_DETECT_MIN_EXPECTED_MOVE_MDEG &&
-                            actualMoveMdeg <= actualMoveThresholdMdeg;
-                        stalledLoopCounts[i] = stalledByPosition ? stalledLoopCounts[i] + 1 : 0;
+                        bool stalledNow =
+                            Math.Abs(jointError) >= CSP_STALL_MIN_ERR_MDEG &&
+                            Math.Abs(commandedVel) >= CSP_STALL_MIN_CMD_VEL_MDEG &&
+                            Math.Abs(AxisCard.Speed[i]) <= CSP_STALL_MAX_ACTUAL_VEL_MDEG;
+                        stalledLoopCounts[i] = stalledNow ? stalledLoopCounts[i] + 1 : 0;
 
-                        bool unexpectedStop =
-                            AxisCard.State[i] == MotorState.STOP &&
-                            Math.Abs(jointError) >= CSP_UNEXPECTED_STOP_RESEND_MIN_ERR_MDEG &&
-                            Math.Abs(commandedVel) >= CSP_UNEXPECTED_STOP_RESEND_MIN_CMD_VEL_MDEG;
-
-                        bool shouldResendAbsMove =
-                            (unexpectedStop ||
-                             stalledLoopCounts[i] >= CSP_STALL_DETECT_CONSECUTIVE_LOOPS) &&
-                            loopCount - lastUnexpectedStopResendLoop[i] >= CSP_UNEXPECTED_STOP_RESEND_INTERVAL_LOOPS;
-
-                        if (shouldResendAbsMove)
+                        if (!stalledNow && stallActive[i] && Math.Abs(AxisCard.Speed[i]) > CSP_STALL_MAX_ACTUAL_VEL_MDEG)
                         {
-                            bool resent = AxisCard.MoveAbsolute(
-                                i,
-                                expectedLimitTarget,
-                                0,
-                                1,
-                                1,
-                                0.1,
-                                0.1);
-                            if (resent)
+                            stallRecoveredByMotion[i] = true;
+                        }
+
+                        if (stalledLoopCounts[i] >= CSP_STALL_DETECT_CONSECUTIVE_LOOPS && !stallActive[i])
+                        {
+                            stallActive[i] = true;
+                            stallRecoveredByMotion[i] = false;
+                            stallAutoRearmIssued[i] = false;
+                            stallDetectedLoop[i] = loopCount;
+                            _log.Warn(
+                                $"CSP 軸{i + 1} StallSuspected: actual={currentMdeg[i] / 1000f:F3}°, target={targetMdeg[i] / 1000f:F3}°, " +
+                                $"cmdVel={commandedVel / 1000f:F3}°/s, actualVel={AxisCard.Speed[i] / 1000f:F3}°/s, limit={activeLimitTargets[i] / 1000f:F3}°");
+                        }
+
+                        bool shouldAutoRearm =
+                            stallActive[i] &&
+                            !stallAutoRearmIssued[i] &&
+                            Math.Abs(jointError) >= CSP_STALL_MIN_ERR_MDEG &&
+                            Math.Abs(AxisCard.Speed[i]) <= CSP_STALL_MAX_ACTUAL_VEL_MDEG &&
+                            loopCount - stallDetectedLoop[i] >= CSP_STALL_REARM_DELAY_LOOPS &&
+                            loopCount - lastRearmLoop[i] >= CSP_STALL_REARM_COOLDOWN_LOOPS;
+
+                        if (shouldAutoRearm)
+                        {
+                            bool rearmed = AxisCard.MoveAbsolute(i, activeLimitTargets[i], 0, 1, 1, 0.1, 0.1);
+                            if (rearmed)
                             {
-                                lastUnexpectedStopResendLoop[i] = loopCount;
-                                stalledLoopCounts[i] = 0;
-                                activeLimitTargets[i] = expectedLimitTarget;
+                                stallAutoRearmIssued[i] = true;
+                                lastRearmLoop[i] = loopCount;
                                 _log.Warn(
-                                    $"CSP 軸{i + 1} 偵測到 AbsMove 意外結束或位置停滯，依目標側重送 MoveAbsolute：limit={expectedLimitTarget / 1000f:F3}°, " +
-                                    $"actual={currentMdeg[i] / 1000f:F3}°, target={targetMdeg[i] / 1000f:F3}°, cmdVel={commandedVel / 1000f:F3}°/s, expectedMove={expectedMoveMdeg / 1000f:F3}°, actualMove={actualMoveMdeg / 1000f:F3}°, stalledLoops={stalledLoopCounts[i]}");
+                                    $"CSP 軸{i + 1} StallAutoRearm: limit={activeLimitTargets[i] / 1000f:F3}°, actual={currentMdeg[i] / 1000f:F3}°, " +
+                                    $"target={targetMdeg[i] / 1000f:F3}°, cmdVel={commandedVel / 1000f:F3}°/s");
                             }
                             else
                             {
-                                _log.Warn($"CSP 軸{i + 1} 意外 STOP 後重送 MoveAbsolute 失敗");
+                                _log.Warn($"CSP 軸{i + 1} StallAutoRearm 失敗");
                             }
+                        }
+
+                        if (!stalledNow && stallActive[i])
+                        {
+                            string recoveryKind = stallRecoveredByMotion[i]
+                                ? "StallRecoveredByMotion"
+                                : "StallRecoveredByCommandDrop";
+                            _log.Info(
+                                $"CSP 軸{i + 1} {recoveryKind}: actualVel={AxisCard.Speed[i] / 1000f:F3}°/s, cmdVel={commandedVel / 1000f:F3}°/s");
+                            stallActive[i] = false;
+                            stallRecoveredByMotion[i] = false;
+                            stallAutoRearmIssued[i] = false;
+                            stalledLoopCounts[i] = 0;
                         }
 
                         desiredVelMdegPerSec[i] = desiredVel;
@@ -852,7 +889,6 @@ namespace Robot.Motion.RA605
                         prevVelMdegPerSec[i] = commandedVel;
                         prevTargetMdeg[i] = targetMdeg[i];
                         hasPrevTargetMdeg[i] = true;
-                        prevActualMdeg[i] = currentMdeg[i];
                     }
                     lock (_continuousLock)
                     {
@@ -975,6 +1011,21 @@ namespace Robot.Motion.RA605
 
         private static int SelectCspLimitTarget(int axis, int currentMdeg, int targetMdeg)
             => targetMdeg >= currentMdeg ? CSP_JOINT_LIMIT_POS[axis] : CSP_JOINT_LIMIT_NEG[axis];
+
+        private static int GetLimitDirectionSign(int axis, int limitTargetMdeg)
+            => Math.Abs(limitTargetMdeg - CSP_JOINT_LIMIT_NEG[axis]) <= 1 ? -1 : 1;
+
+        private static void UpdatePendingDirection(int[] pendingDirectionSign, int[] pendingDirectionStableLoops, int axis, int desiredDirectionSign)
+        {
+            if (desiredDirectionSign == pendingDirectionSign[axis])
+            {
+                pendingDirectionStableLoops[axis]++;
+                return;
+            }
+
+            pendingDirectionSign[axis] = desiredDirectionSign;
+            pendingDirectionStableLoops[axis] = 1;
+        }
 
         private static Matrix4x4 AdvanceVirtualPosture(Matrix4x4 posture,
             float dx, float dy, float dz, float dYaw, float dPitch, float dRoll)
